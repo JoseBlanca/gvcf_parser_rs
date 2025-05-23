@@ -95,8 +95,14 @@ mod tests {
     #[test]
     fn test_parse_vcf_gz_file() -> Result<(), Box<dyn std::error::Error>> {
         use rust_htslib::bgzf::Reader;
+        use rust_htslib::tpool::ThreadPool;
+
         let file_name = "/home/jose/analyses/g2psol/source_data/TS.vcf.gz";
-        let reader = Reader::from_path(file_name)?;
+        let mut reader = Reader::from_path(file_name)?;
+
+        let pool = ThreadPool::new(3)?;
+        reader.set_thread_pool(&pool)?;
+
         let buffered = BufReader::new(reader);
         let _res = parse_vcf2(buffered);
         Ok(())
