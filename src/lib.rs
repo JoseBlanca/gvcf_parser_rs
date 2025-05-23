@@ -13,15 +13,51 @@ pub struct VcfRecord {
 
 pub fn parse_vcf<R: BufRead>(reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
     for (line_idx, line_result) in reader.lines().enumerate() {
-        let line = line_result?;
-        println!("{line_idx} {line}");
+        match line_result {
+            Ok(line) => println!(
+                "OK {line_idx} len={}: {}",
+                line.len(),
+                &line.chars().take(20).collect::<String>()
+            ),
+            Err(e) => {
+                println!("Error at line {line_idx}: {e}");
+                return Err(Box::new(e));
+            }
+        }
+        //println!("{line_idx}");
     }
     Err(format!("Hola").into())
 }
 
+pub fn parse_vcf2<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
+    let mut line = String::new();
+    let mut records: Vec<VcfRecord> = Vec::new();
+
+    let mut idx = 0;
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line)?;
+        if n == 0 {
+            break;
+        }
+
+        if line.starts_with("##") {
+            continue;
+        }
+        println!(
+            "OK {idx} len={}: {}",
+            line.len(),
+            &line.chars().take(20).collect::<String>()
+        );
+        idx += 1;
+    }
+
+    Err("Finished reading".into())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::io::BufReader;
 
     const SAMPLE_VCF: &str = "##fileformat=VCFv4.5
@@ -51,8 +87,19 @@ mod tests {
 20\t1234567\tmicrosat1\tGTC\tG,GTCT\t50\tPASS\tNS=3;DP=9;AA=G\tGT:GQ:DP\t0/1:35:4\t0/2:17:2\t1/1:40:3";
 
     #[test]
+    #[ignore]
     fn test_parse_vcf() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
         let _res = parse_vcf(reader);
+    }
+    #[test]
+    fn test_parse_vcf_gz_file() {
+        let file_name = "/home/jose/analyses/g2psol/source_data/TS.vcf.gz";
+        let file_name = "/home/jose/devel/vcf_parser_rs/all.vcf.gz";
+
+        let file = File::open(file_name).expect("Failed to open VCF file");
+        let gz = flate2::read::GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let _res = parse_vcf2(reader);
     }
 }
