@@ -93,13 +93,12 @@ mod tests {
         let _res = parse_vcf(reader);
     }
     #[test]
-    fn test_parse_vcf_gz_file() {
+    fn test_parse_vcf_gz_file() -> Result<(), Box<dyn std::error::Error>> {
+        use rust_htslib::bgzf::Reader;
         let file_name = "/home/jose/analyses/g2psol/source_data/TS.vcf.gz";
-        let file_name = "/home/jose/devel/vcf_parser_rs/all.vcf.gz";
-
-        let file = File::open(file_name).expect("Failed to open VCF file");
-        let gz = flate2::read::GzDecoder::new(file);
-        let reader = BufReader::new(gz);
-        let _res = parse_vcf2(reader);
+        let reader = Reader::from_path(file_name)?;
+        let buffered = BufReader::new(reader);
+        let _res = parse_vcf2(buffered);
+        Ok(())
     }
 }
