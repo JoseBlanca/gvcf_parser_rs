@@ -1,6 +1,4 @@
 use lru::LruCache;
-use rust_htslib::bgzf::Reader as BgzfReader;
-use rust_htslib::tpool::ThreadPool;
 use std::error::Error;
 use std::io::BufRead;
 use std::num::NonZeroUsize;
@@ -89,7 +87,7 @@ impl VcfRecord {
             let parsed = get_cached_genotype(gt_str, ploidy, gt_cache)?;
             results.push(parsed);
         }
-        let genotypes: Result<Vec<Vec<i32>>, Box<dyn std::error::Error>> = Ok(results);
+        let _genotypes: Result<Vec<Vec<i32>>, Box<dyn std::error::Error>> = Ok(results);
 
         Ok(VcfRecord {
             chrom: cols[0].to_string(),
@@ -109,7 +107,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
             line.clear();
             continue;
         };
-        VcfRecord::from_line(&line, &mut cache);
+        _ = VcfRecord::from_line(&line, &mut cache);
         line.clear();
     }
     Err("Finished reading".into())
@@ -155,13 +153,16 @@ mod tests {
     #[test]
     //#[ignore]
     fn test_parse_vcf_gz_file() -> Result<(), Box<dyn std::error::Error>> {
+        // 28 seconds
+        use rust_htslib::bgzf::Reader as BgzfReader;
+        use rust_htslib::tpool::ThreadPool;
         let n_threads = 4;
         let pool = ThreadPool::new(n_threads)?;
         let file_name = "/home/jose/analyses/g2psol/source_data/TS.vcf.gz";
         let mut raw_reader = BgzfReader::from_path(file_name)?;
         raw_reader.set_thread_pool(&pool)?;
 
-        let mut reader = BufReader::new(raw_reader);
+        let reader = BufReader::new(raw_reader);
 
         let _res = parse_vcf(reader);
         Ok(())
