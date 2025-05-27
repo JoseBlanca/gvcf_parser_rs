@@ -1,24 +1,115 @@
+use lru::LruCache;
 use rust_htslib::bgzf::Reader as BgzfReader;
 use rust_htslib::tpool::ThreadPool;
 use std::error::Error;
 use std::io::BufRead;
+use std::num::NonZeroUsize;
+
+const MISSING_GT: i32 = -1;
 
 #[derive(Debug)]
 pub struct VcfRecord {
     pub chrom: String,
     pub pos: u32,
-    pub ref_allele: String,
-    pub alt_allele: String,
+    pub alleles: Vec<String>,
     pub qual: f32,
-    pub samples: Vec<String>,
+    //pub samples: Vec<String>,
 }
 
-pub fn parse_with_hstlib<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
+fn parse_genotype(gt_str: &str, ploidy: usize) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
+    let gt_ints: Vec<i32> = gt_str
+        .split(|c| c == '/' || c == '|')
+        .map(|a| {
+            if a == "." {
+                MISSING_GT
+            } else {
+                a.parse::<i32>().unwrap_or(MISSING_GT)
+            }
+        })
+        .collect();
+
+    match gt_ints.len() {
+        n if n > ploidy => Err(format!("Sample has too many alleles: {:?}", gt_ints).into()),
+        1 if gt_ints[0] == MISSING_GT => Ok(vec![MISSING_GT; ploidy]),
+        n if n < ploidy => Err(format!("Sample has incomplete genotype: {:?}", gt_ints).into()),
+        n if n == ploidy => Ok(gt_ints),
+        _ => Err(format!("Unexpected ploidy for sample: {:?}", gt_ints).into()),
+    }
+}
+
+fn get_cached_genotype(
+    gt_str: &str,
+    ploidy: usize,
+    cache: &mut LruCache<(String, usize), Vec<i32>>,
+) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
+    let key = (gt_str.to_string(), ploidy);
+    if let Some(cached) = cache.get(&key) {
+        return Ok(cached.clone());
+    }
+
+    let parsed = parse_genotype(gt_str, ploidy)?;
+    cache.put(key, parsed.clone());
+    Ok(parsed)
+}
+
+impl VcfRecord {
+    pub fn from_line(
+        line: &str,
+        gt_cache: &mut LruCache<(String, usize), Vec<i32>>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let ploidy: usize = 2;
+        let default_gt = vec!["."; ploidy].join("/");
+
+        let cols: Vec<&str> = line.trim_end().split('\t').collect();
+        if cols.len() < 8 {
+            return Err("Not enough columns in VCF line".into());
+        }
+        let ref_allele = cols[3];
+        let alt_alleles = cols[4];
+        let alleles: Vec<String>;
+        if alt_alleles == "." {
+            alleles = std::iter::once(ref_allele).map(str::to_string).collect();
+        } else {
+            alleles = std::iter::once(ref_allele)
+                .chain(alt_alleles.split(','))
+                .map(str::to_string)
+                .collect();
+        }
+
+        let qual = cols[5].parse::<f32>()?;
+
+        let gt_idx = cols[8]
+            .split(":")
+            .position(|f| f == "GT")
+            .ok_or("GT field not found in FORMAT")?;
+
+        let mut results = Vec::with_capacity(cols.len() - 9);
+        for sample_field in &cols[9..] {
+            let gt_str = sample_field.split(':').nth(gt_idx).unwrap_or(&default_gt);
+            let parsed = get_cached_genotype(gt_str, ploidy, gt_cache)?;
+            results.push(parsed);
+        }
+        let genotypes: Result<Vec<Vec<i32>>, Box<dyn std::error::Error>> = Ok(results);
+
+        Ok(VcfRecord {
+            chrom: cols[0].to_string(),
+            pos: cols[1].parse()?,
+            alleles,
+            qual,
+        })
+    }
+}
+
+pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
+    let mut cache: LruCache<(String, usize), Vec<i32>> =
+        LruCache::new(NonZeroUsize::new(1024).unwrap());
     let mut line = String::new();
     while reader.read_line(&mut line)? > 0 {
-        if line.starts_with('#') {
-            println!("VCF line: {}", line.trim_end());
-        }
+        if line.starts_with("#") {
+            line.clear();
+            continue;
+        };
+        VcfRecord::from_line(&line, &mut cache);
         line.clear();
     }
     Err("Finished reading".into())
@@ -53,13 +144,13 @@ mod tests {
 20\t1110696\trs6040355\tA\tG,T\t67\tPASS\tNS=2;DP=10;AF=0.333,0.667;AA=T;DB\tGT:GQ:DP:HQ\t1|2:21:6:23,27\t2|1:2:0:18,2\t2/2:35:4
 20\t1230237\t.\tT\t.\t47\tPASS\tNS=3;DP=13;AA=T\tGT:GQ:DP:HQ\t0|0:54:7:56,60\t0|0:48:4:51,51\t0/0:61:2
 20\t1234567\tmicrosat1\tGTC\tG,GTCT\t50\tPASS\tNS=3;DP=9;AA=G\tGT:GQ:DP\t0/1:35:4\t0/2:17:2\t1/1:40:3
-20\t1234567\tmicrosat1\tGTC\tG,GTCT\t50\tPASS\tNS=3;DP=9;AA=G\tGT:GQ:DP\t0/1:35:4\t0/2:17:2\t1/1:40:3";
+20\t1234567\tmicrosat1\tGTC\tG,GTCT\t50\tPASS\tNS=3;DP=9;AA=G\tGT:GQ:DP\t.:35:4\t0/2:17:2\t./1:40:3";
 
     #[test]
-    #[ignore]
+    //#[ignore]
     fn test_parse_vcf() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
-        let _res = parse_with_hstlib(reader);
+        let _res = parse_vcf(reader);
     }
     #[test]
     //#[ignore]
@@ -72,7 +163,7 @@ mod tests {
 
         let mut reader = BufReader::new(raw_reader);
 
-        let _res = parse_with_hstlib(reader);
+        let _res = parse_vcf(reader);
         Ok(())
     }
 }
