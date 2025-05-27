@@ -1,3 +1,5 @@
+use rust_htslib::bgzf::Reader as BgzfReader;
+use rust_htslib::tpool::ThreadPool;
 use std::error::Error;
 use std::io::BufRead;
 
@@ -11,53 +13,20 @@ pub struct VcfRecord {
     pub samples: Vec<String>,
 }
 
-pub fn parse_vcf<R: BufRead>(reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
-    for (line_idx, line_result) in reader.lines().enumerate() {
-        match line_result {
-            Ok(line) => println!(
-                "OK {line_idx} len={}: {}",
-                line.len(),
-                &line.chars().take(20).collect::<String>()
-            ),
-            Err(e) => {
-                println!("Error at line {line_idx}: {e}");
-                return Err(Box::new(e));
-            }
-        }
-        //println!("{line_idx}");
-    }
-    Err(format!("Hola").into())
-}
-
-pub fn parse_vcf2<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
+pub fn parse_with_hstlib<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
     let mut line = String::new();
-    let mut records: Vec<VcfRecord> = Vec::new();
-
-    let mut idx = 0;
-    loop {
+    while reader.read_line(&mut line)? > 0 {
+        if line.starts_with('#') {
+            println!("VCF line: {}", line.trim_end());
+        }
         line.clear();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 {
-            break;
-        }
-
-        if line.starts_with("##") {
-            continue;
-        }
-        println!(
-            "OK {idx} len={}: {}",
-            line.len(),
-            &line.chars().take(20).collect::<String>()
-        );
-        idx += 1;
     }
-
     Err("Finished reading".into())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
     use std::io::BufReader;
 
     const SAMPLE_VCF: &str = "##fileformat=VCFv4.5
@@ -90,21 +59,20 @@ mod tests {
     #[ignore]
     fn test_parse_vcf() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
-        let _res = parse_vcf(reader);
+        let _res = parse_with_hstlib(reader);
     }
     #[test]
+    //#[ignore]
     fn test_parse_vcf_gz_file() -> Result<(), Box<dyn std::error::Error>> {
-        use rust_htslib::bgzf::Reader;
-        use rust_htslib::tpool::ThreadPool;
-
+        let n_threads = 4;
+        let pool = ThreadPool::new(n_threads)?;
         let file_name = "/home/jose/analyses/g2psol/source_data/TS.vcf.gz";
-        let mut reader = Reader::from_path(file_name)?;
+        let mut raw_reader = BgzfReader::from_path(file_name)?;
+        raw_reader.set_thread_pool(&pool)?;
 
-        let pool = ThreadPool::new(3)?;
-        reader.set_thread_pool(&pool)?;
+        let mut reader = BufReader::new(raw_reader);
 
-        let buffered = BufReader::new(reader);
-        let _res = parse_vcf2(buffered);
+        let _res = parse_with_hstlib(reader);
         Ok(())
     }
 }
