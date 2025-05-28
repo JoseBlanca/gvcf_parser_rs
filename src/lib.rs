@@ -14,40 +14,32 @@ pub struct VcfRecord {
     //pub samples: Vec<String>,
 }
 
-fn parse_genotype(gt_str: &str, ploidy: usize) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
-    let gt_ints: Vec<i32> = gt_str
-        .split(|c| c == '/' || c == '|')
-        .map(|a| {
-            if a == "." {
-                MISSING_GT
-            } else {
-                a.parse::<i32>().unwrap_or(MISSING_GT)
-            }
-        })
-        .collect();
-
-    match gt_ints.len() {
-        n if n > ploidy => Err(format!("Sample has too many alleles: {:?}", gt_ints).into()),
-        1 if gt_ints[0] == MISSING_GT => Ok(vec![MISSING_GT; ploidy]),
-        n if n < ploidy => Err(format!("Sample has incomplete genotype: {:?}", gt_ints).into()),
-        n if n == ploidy => Ok(gt_ints),
-        _ => Err(format!("Unexpected ploidy for sample: {:?}", gt_ints).into()),
-    }
+fn set_gt(
+    genotypes: &mut Vec<i32>,
+    sample_idx: usize,
+    allele_idx: usize,
+    ploidy: usize,
+    value: i32,
+) {
+    let pos = sample_idx * ploidy + allele_idx;
+    genotypes[pos] = value;
 }
 
-fn get_cached_genotype(
-    gt_str: &str,
-    ploidy: usize,
-    cache: &mut LruCache<(String, usize), Vec<i32>>,
-) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
-    let key = (gt_str.to_string(), ploidy);
-    if let Some(cached) = cache.get(&key) {
-        return Ok(cached.clone());
+fn digit_str_to_int(s: &str) -> i32 {
+    match s {
+        "." => MISSING_GT,
+        "0" => 0,
+        "1" => 1,
+        "2" => 2,
+        "3" => 3,
+        "4" => 4,
+        "5" => 5,
+        "6" => 6,
+        "7" => 7,
+        "8" => 8,
+        "9" => 9,
+        allele => allele.parse::<i32>().unwrap_or(MISSING_GT),
     }
-
-    let parsed = parse_genotype(gt_str, ploidy)?;
-    cache.put(key, parsed.clone());
-    Ok(parsed)
 }
 
 impl VcfRecord {
@@ -88,12 +80,14 @@ impl VcfRecord {
             if gt_str == reference_gt {
                 continue;
             };
-            //println!("{}, {}", reference_gt, gt_str);
-            let gt = get_cached_genotype(gt_str, *ploidy, gt_cache)?;
-            //results.push(parsed);
-            for (allele_idx, &allele) in gt.iter().enumerate() {
-                let pos = sample_idx * *ploidy + allele_idx;
-                genotypes[pos] = allele;
+            for (allele_idx, allele_str) in gt_str.split(|c| c == '/' || c == '|').enumerate() {
+                set_gt(
+                    &mut genotypes,
+                    sample_idx,
+                    allele_idx,
+                    *ploidy,
+                    digit_str_to_int(allele_str),
+                );
             }
         }
         //let _genotypes: Result<Vec<Vec<i32>>, Box<dyn std::error::Error>> = Ok(results);
@@ -181,6 +175,7 @@ mod tests {
         // 28 seconds
         // 30 seconds
         // 11 seconds
+        // 10 seconds
         use rust_htslib::bgzf::Reader as BgzfReader;
         use rust_htslib::tpool::ThreadPool;
         let n_threads = 4;
