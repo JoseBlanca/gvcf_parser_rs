@@ -1,4 +1,3 @@
-use lru::LruCache;
 use std::error::Error;
 use std::io::BufRead;
 use std::num::NonZeroUsize;
@@ -45,7 +44,6 @@ fn digit_str_to_int(s: &str) -> i32 {
 impl VcfRecord {
     pub fn from_line(
         line: &str,
-        gt_cache: &mut LruCache<(String, usize), Vec<i32>>,
         num_samples: &usize,
         ploidy: &usize,
         reference_gt: &str,
@@ -81,6 +79,9 @@ impl VcfRecord {
                 continue;
             };
             for (allele_idx, allele_str) in gt_str.split(|c| c == '/' || c == '|').enumerate() {
+                if allele_str == "0" {
+                    continue;
+                };
                 set_gt(
                     &mut genotypes,
                     sample_idx,
@@ -102,8 +103,6 @@ impl VcfRecord {
 }
 
 pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
-    let mut cache: LruCache<(String, usize), Vec<i32>> =
-        LruCache::new(NonZeroUsize::new(1024).unwrap());
     let mut line = String::new();
     let mut num_samples: usize = 0;
     let ploidy: usize = 2;
@@ -126,7 +125,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
         if num_samples == 0 {
             return Err("Num. samples not initialized. Possible missing #CHROM line".into());
         }
-        _ = VcfRecord::from_line(&line, &mut cache, &num_samples, &ploidy, &reference_gt);
+        _ = VcfRecord::from_line(&line, &num_samples, &ploidy, &reference_gt);
         line.clear();
     }
     Err("Finished reading".into())
