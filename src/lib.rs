@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::io::BufRead;
-use std::num::NonZeroUsize;
 
 const MISSING_GT: i32 = -1;
 
@@ -47,7 +46,6 @@ impl VcfRecord {
         num_samples: &usize,
         ploidy: &usize,
         reference_gt: &str,
-        reference_gt_with_colon: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let cols: Vec<&str> = line.trim_end().split('\t').collect();
         if cols.len() < 8 {
@@ -74,10 +72,16 @@ impl VcfRecord {
 
         let mut genotypes: Vec<i32> = vec![0; num_samples * *ploidy];
         for (sample_idx, sample_field) in cols[9..].iter().enumerate() {
-            if sample_field.starts_with(reference_gt_with_colon) {
+            if gt_idx == 0 && sample_field.starts_with(reference_gt) {
                 continue;
             };
-            let gt_str = sample_field.split(':').nth(gt_idx).unwrap_or(&reference_gt);
+            //let gt_str = get_gt_field(sample_field, gt_idx)?;
+            let gt_str = sample_field.split(':').nth(gt_idx).ok_or_else(|| {
+                format!(
+                    "Missing GT field at index {} in sample '{}'",
+                    gt_idx, sample_field
+                )
+            })?;
             if gt_str == reference_gt {
                 continue;
             };
@@ -109,7 +113,6 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
     let mut num_samples: usize = 0;
     let ploidy: usize = 2;
     let reference_gt = vec!["0"; ploidy].join("/");
-    let reference_gt_with_colon = reference_gt.clone() + ":";
 
     while reader.read_line(&mut line)? > 0 {
         if line.starts_with("##") {
@@ -128,13 +131,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
         if num_samples == 0 {
             return Err("Num. samples not initialized. Possible missing #CHROM line".into());
         }
-        _ = VcfRecord::from_line(
-            &line,
-            &num_samples,
-            &ploidy,
-            &reference_gt,
-            &reference_gt_with_colon,
-        );
+        _ = VcfRecord::from_line(&line, &num_samples, &ploidy, &reference_gt);
         line.clear();
     }
     Err("Finished reading".into())
