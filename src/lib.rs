@@ -54,10 +54,10 @@ impl VcfRecord {
     pub fn from_line(
         line: &str,
         gt_cache: &mut LruCache<(String, usize), Vec<i32>>,
+        num_samples: &usize,
+        ploidy: &usize,
+        reference_gt: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let ploidy: usize = 2;
-        let default_gt = vec!["."; ploidy].join("/");
-
         let cols: Vec<&str> = line.trim_end().split('\t').collect();
         if cols.len() < 8 {
             return Err("Not enough columns in VCF line".into());
@@ -81,13 +81,21 @@ impl VcfRecord {
             .position(|f| f == "GT")
             .ok_or("GT field not found in FORMAT")?;
 
-        let mut results = Vec::with_capacity(cols.len() - 9);
-        for sample_field in &cols[9..] {
-            let gt_str = sample_field.split(':').nth(gt_idx).unwrap_or(&default_gt);
-            let parsed = get_cached_genotype(gt_str, ploidy, gt_cache)?;
-            results.push(parsed);
+        //let mut results = Vec::with_capacity(cols.len() - 9);
+        let mut genotypes: Vec<i32> = vec![MISSING_GT; num_samples * *ploidy];
+        for (sample_idx, sample_field) in cols[9..].iter().enumerate() {
+            let gt_str = sample_field.split(':').nth(gt_idx).unwrap_or(&reference_gt);
+            if gt_str == reference_gt {
+                continue;
+            };
+            let gt = get_cached_genotype(gt_str, *ploidy, gt_cache)?;
+            //results.push(parsed);
+            for (allele_idx, &allele) in gt.iter().enumerate() {
+                let pos = sample_idx * *ploidy + allele_idx;
+                genotypes[pos] = allele;
+            }
         }
-        let _genotypes: Result<Vec<Vec<i32>>, Box<dyn std::error::Error>> = Ok(results);
+        //let _genotypes: Result<Vec<Vec<i32>>, Box<dyn std::error::Error>> = Ok(results);
 
         Ok(VcfRecord {
             chrom: cols[0].to_string(),
@@ -102,12 +110,28 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
     let mut cache: LruCache<(String, usize), Vec<i32>> =
         LruCache::new(NonZeroUsize::new(1024).unwrap());
     let mut line = String::new();
+    let mut num_samples: usize = 0;
+    let ploidy: usize = 2;
+    let reference_gt = vec!["."; ploidy].join("/");
+
     while reader.read_line(&mut line)? > 0 {
-        if line.starts_with("#") {
+        if line.starts_with("##") {
             line.clear();
             continue;
         };
-        _ = VcfRecord::from_line(&line, &mut cache);
+        if line.starts_with("#CHROM") {
+            let fields: Vec<&str> = line.trim_end().split('\t').collect();
+            if fields.len() < 9 {
+                return Err("Not enough fields found in the CROM line".into());
+            }
+            num_samples = fields.len() - 9;
+            line.clear();
+            continue;
+        };
+        if num_samples == 0 {
+            return Err("Num. samples not initialized. Possible missing #CHROM line".into());
+        }
+        _ = VcfRecord::from_line(&line, &mut cache, &num_samples, &ploidy, &reference_gt);
         line.clear();
     }
     Err("Finished reading".into())
@@ -145,7 +169,7 @@ mod tests {
 20\t1234567\tmicrosat1\tGTC\tG,GTCT\t50\tPASS\tNS=3;DP=9;AA=G\tGT:GQ:DP\t.:35:4\t0/2:17:2\t./1:40:3";
 
     #[test]
-    //#[ignore]
+    #[ignore]
     fn test_parse_vcf() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
         let _res = parse_vcf(reader);
@@ -154,6 +178,7 @@ mod tests {
     //#[ignore]
     fn test_parse_vcf_gz_file() -> Result<(), Box<dyn std::error::Error>> {
         // 28 seconds
+        // 30 seconds
         use rust_htslib::bgzf::Reader as BgzfReader;
         use rust_htslib::tpool::ThreadPool;
         let n_threads = 4;
