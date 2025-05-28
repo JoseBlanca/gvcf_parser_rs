@@ -169,7 +169,7 @@ mod tests {
 20\t1234567\tmicrosat1\tGTC\tG,GTCT\t50\tPASS\tNS=3;DP=9;AA=G\tGT:GQ:DP\t.:35:4\t0/2:17:2\t./1:40:3";
 
     #[test]
-    #[ignore]
+    //#[ignore]
     fn test_parse_vcf() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
         let _res = parse_vcf(reader);
@@ -177,11 +177,6 @@ mod tests {
     #[test]
     //#[ignore]
     fn test_parse_vcf_gz_file() -> Result<(), Box<dyn std::error::Error>> {
-        // 28 seconds
-        // 30 seconds
-        // 11 seconds
-        // 10 seconds
-        // 7 seconds
         use rust_htslib::bgzf::Reader as BgzfReader;
         use rust_htslib::tpool::ThreadPool;
         let n_threads = 4;
