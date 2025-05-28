@@ -47,6 +47,7 @@ impl VcfRecord {
         num_samples: &usize,
         ploidy: &usize,
         reference_gt: &str,
+        reference_gt_with_colon: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let cols: Vec<&str> = line.trim_end().split('\t').collect();
         if cols.len() < 8 {
@@ -71,9 +72,11 @@ impl VcfRecord {
             .position(|f| f == "GT")
             .ok_or("GT field not found in FORMAT")?;
 
-        //let mut results = Vec::with_capacity(cols.len() - 9);
         let mut genotypes: Vec<i32> = vec![0; num_samples * *ploidy];
         for (sample_idx, sample_field) in cols[9..].iter().enumerate() {
+            if sample_field.starts_with(reference_gt_with_colon) {
+                continue;
+            };
             let gt_str = sample_field.split(':').nth(gt_idx).unwrap_or(&reference_gt);
             if gt_str == reference_gt {
                 continue;
@@ -91,7 +94,6 @@ impl VcfRecord {
                 );
             }
         }
-        //let _genotypes: Result<Vec<Vec<i32>>, Box<dyn std::error::Error>> = Ok(results);
 
         Ok(VcfRecord {
             chrom: cols[0].to_string(),
@@ -107,6 +109,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
     let mut num_samples: usize = 0;
     let ploidy: usize = 2;
     let reference_gt = vec!["0"; ploidy].join("/");
+    let reference_gt_with_colon = reference_gt.clone() + ":";
 
     while reader.read_line(&mut line)? > 0 {
         if line.starts_with("##") {
@@ -125,7 +128,13 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
         if num_samples == 0 {
             return Err("Num. samples not initialized. Possible missing #CHROM line".into());
         }
-        _ = VcfRecord::from_line(&line, &num_samples, &ploidy, &reference_gt);
+        _ = VcfRecord::from_line(
+            &line,
+            &num_samples,
+            &ploidy,
+            &reference_gt,
+            &reference_gt_with_colon,
+        );
         line.clear();
     }
     Err("Finished reading".into())
@@ -175,6 +184,7 @@ mod tests {
         // 30 seconds
         // 11 seconds
         // 10 seconds
+        // 7 seconds
         use rust_htslib::bgzf::Reader as BgzfReader;
         use rust_htslib::tpool::ThreadPool;
         let n_threads = 4;
