@@ -9,7 +9,7 @@ pub struct VcfRecord {
     pub pos: u32,
     pub alleles: Vec<String>,
     pub qual: f32,
-    //pub samples: Vec<String>,
+    pub genotypes: Vec<i32>,
 }
 
 fn set_gt(
@@ -75,7 +75,6 @@ impl VcfRecord {
             if gt_idx == 0 && sample_field.starts_with(reference_gt) {
                 continue;
             };
-            //let gt_str = get_gt_field(sample_field, gt_idx)?;
             let gt_str = sample_field.split(':').nth(gt_idx).ok_or_else(|| {
                 format!(
                     "Missing GT field at index {} in sample '{}'",
@@ -104,6 +103,7 @@ impl VcfRecord {
             pos: cols[1].parse()?,
             alleles,
             qual,
+            genotypes,
         })
     }
 }
