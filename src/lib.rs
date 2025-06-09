@@ -43,7 +43,7 @@ fn digit_str_to_int(s: &str) -> i32 {
 impl VcfRecord {
     pub fn from_line(
         num_samples: &usize,
-        ploidy: &usize,
+        ploidy: &mut usize,
         reference_gt: &str,
         cols: &mut Vec<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -83,6 +83,7 @@ impl VcfRecord {
             if gt_str == reference_gt {
                 continue;
             };
+            //println!("{}", gt_str);
             for (allele_idx, allele_str) in gt_str.split(|c| c == '/' || c == '|').enumerate() {
                 if allele_str == "0" {
                     continue;
@@ -110,11 +111,11 @@ impl VcfRecord {
 pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
     let mut line = String::new();
     let mut num_samples: usize = 0;
-    let ploidy: usize = 2;
+    let mut ploidy: usize = 2;
     let reference_gt = vec!["0"; ploidy].join("/");
-
     while reader.read_line(&mut line)? > 0 {
         if line.starts_with("##") {
+            line.clear();
             continue;
         } else if line.starts_with("#CHROM") {
             let fields: Vec<&str> = line.trim_end().split('\t').collect();
@@ -122,16 +123,15 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
                 return Err("Not enough fields found in the CROM line".into());
             }
             num_samples = fields.len() - 9;
+            line.clear();
             continue;
         } else {
             if num_samples == 0 {
                 return Err("Num. samples not initialized. Possible missing #CHROM line".into());
             }
-            {
-                let mut fields: Vec<&str> = Vec::with_capacity(num_samples + 8);
-                fields.extend(line.trim_end().split('\t'));
-                let _ = VcfRecord::from_line(&num_samples, &ploidy, &reference_gt, &mut fields);
-            };
+            let mut fields: Vec<&str> = Vec::with_capacity(num_samples + 8);
+            fields.extend(line.trim_end().split('\t'));
+            let _ = VcfRecord::from_line(&num_samples, &mut ploidy, &reference_gt, &mut fields);
         };
         line.clear();
     }
