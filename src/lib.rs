@@ -113,24 +113,20 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
     let mut num_samples: usize = 0;
     let mut ploidy: usize = 2;
     let reference_gt = vec!["0"; ploidy].join("/");
+    let mut fields: Vec<&str>;
     while reader.read_line(&mut line)? > 0 {
         if line.starts_with("##") {
-            line.clear();
-            continue;
         } else if line.starts_with("#CHROM") {
-            let fields: Vec<&str> = line.trim_end().split('\t').collect();
-            if fields.len() < 9 {
+            let fields_: Vec<&str> = line.trim_end().split('\t').collect();
+            if fields_.len() < 9 {
                 return Err("Not enough fields found in the CROM line".into());
             }
-            num_samples = fields.len() - 9;
-            line.clear();
-            continue;
+            num_samples = fields_.len() - 9;
         } else {
             if num_samples == 0 {
                 return Err("Num. samples not initialized. Possible missing #CHROM line".into());
             }
-            let mut fields: Vec<&str> = Vec::with_capacity(num_samples + 8);
-            fields.extend(line.trim_end().split('\t'));
+            fields = line.trim_end().split('\t').collect();
             let _ = VcfRecord::from_line(&num_samples, &mut ploidy, &reference_gt, &mut fields);
         };
         line.clear();
