@@ -84,7 +84,7 @@ impl VcfRecord {
             if gt_str == reference_gt {
                 continue;
             };
-            //println!("{}", gt_str);
+
             for (allele_idx, allele_str) in gt_str.split(|c| c == '/' || c == '|').enumerate() {
                 if allele_str == "0" {
                     continue;
@@ -109,29 +109,70 @@ impl VcfRecord {
     }
 }
 
+fn get_gt_index_from_format_field(cols: &[&str]) -> Result<usize, Box<dyn Error>> {
+    cols.get(8)
+        .ok_or("FORMAT column (#8) not found")?
+        .split(":")
+        .position(|f| f == "GT")
+        .ok_or("GT field not found in FORMAT".into())
+}
+
+fn look_for_ploidy(cols: &[&str]) -> Result<usize, Box<dyn Error>> {
+    let gt_idx = get_gt_index_from_format_field(cols)?;
+    for sample_field in &cols[9..] {
+        let gt_str = sample_field.split(':').nth(gt_idx).ok_or_else(|| {
+            format!(
+                "Missing GT field at index {} in sample '{}'",
+                gt_idx, sample_field
+            )
+        })?;
+        if gt_str == "." {
+            continue;
+        };
+        return Ok(gt_str.split(|c| c == '/' || c == '|').count());
+    }
+    Err("It was not possible to determine ploidy".into())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum VcfSection {
+    Header,
+    FirstVariation,
+    Body,
+}
+
 pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
     let mut line = String::new();
+    let mut section = VcfSection::Header;
     let mut num_samples: usize = 0;
-    let ploidy: usize = 2;
-    let reference_gt = vec!["0"; ploidy].join("/");
+    let mut ploidy: usize = 0;
+    let reference_gt = vec!["0"; 2].join("/");
 
     while reader.read_line(&mut line)? > 0 {
-        if line.starts_with("##") {
-        } else if line.starts_with("#CHROM") {
-            let fields_: Vec<&str> = line.trim_end().split('\t').collect();
-            if fields_.len() < 9 {
-                return Err("Not enough fields found in the CROM line".into());
+        match section {
+            VcfSection::Body => {
+                let fields: Vec<&str> = line.trim_end().split('\t').collect();
+                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &fields);
             }
-            num_samples = fields_.len() - 9;
-        } else {
-            if num_samples == 0 {
-                return Err("Num. samples not initialized. Possible missing #CHROM line".into());
+            VcfSection::FirstVariation => {
+                let fields: Vec<&str> = line.trim_end().split('\t').collect();
+                ploidy = look_for_ploidy(&fields)?;
+
+                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &fields);
+                section = VcfSection::Body;
             }
-
-            let fields = line.trim_end().split('\t').collect();
-
-            let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &fields);
-        };
+            VcfSection::Header => {
+                if line.starts_with("##") {
+                } else if line.starts_with("#CHROM") {
+                    let fields_: Vec<&str> = line.trim_end().split('\t').collect();
+                    if fields_.len() < 9 {
+                        return Err("Not enough fields found in the CROM line".into());
+                    }
+                    num_samples = fields_.len() - 9;
+                    section = VcfSection::FirstVariation;
+                }
+            }
+        }
         line.clear();
     }
     Err("Finished reading".into())
