@@ -148,7 +148,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
     let mut section = VcfSection::Header;
     let mut num_samples: usize = 0;
     let mut ploidy: usize = 0;
-    let reference_gt = vec!["0"; 2].join("/");
+    let mut reference_gt = String::from("");
 
     while reader.read_line(&mut line)? > 0 {
         match section {
@@ -157,6 +157,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
             }
             VcfSection::FirstVariation => {
                 ploidy = look_for_ploidy(&line)?;
+                reference_gt = vec!["0"; ploidy].join("/");
 
                 let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &line);
                 section = VcfSection::Body;
