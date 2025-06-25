@@ -45,8 +45,9 @@ impl VcfRecord {
         num_samples: &usize,
         ploidy: usize,
         reference_gt: &str,
-        cols: &Vec<&str>,
+        line: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let cols: Vec<&str> = line.trim_end().split('\t').collect();
         if cols.len() < 8 {
             return Err("Not enough columns in VCF line".into());
         }
@@ -117,8 +118,9 @@ fn get_gt_index_from_format_field(cols: &[&str]) -> Result<usize, Box<dyn Error>
         .ok_or("GT field not found in FORMAT".into())
 }
 
-fn look_for_ploidy(cols: &[&str]) -> Result<usize, Box<dyn Error>> {
-    let gt_idx = get_gt_index_from_format_field(cols)?;
+fn look_for_ploidy(line: &str) -> Result<usize, Box<dyn Error>> {
+    let cols: Vec<&str> = line.trim_end().split('\t').collect();
+    let gt_idx = get_gt_index_from_format_field(&cols)?;
     for sample_field in &cols[9..] {
         let gt_str = sample_field.split(':').nth(gt_idx).ok_or_else(|| {
             format!(
@@ -151,14 +153,12 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
     while reader.read_line(&mut line)? > 0 {
         match section {
             VcfSection::Body => {
-                let fields: Vec<&str> = line.trim_end().split('\t').collect();
-                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &fields);
+                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &line);
             }
             VcfSection::FirstVariation => {
-                let fields: Vec<&str> = line.trim_end().split('\t').collect();
-                ploidy = look_for_ploidy(&fields)?;
+                ploidy = look_for_ploidy(&line)?;
 
-                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &fields);
+                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &line);
                 section = VcfSection::Body;
             }
             VcfSection::Header => {
