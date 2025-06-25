@@ -45,7 +45,7 @@ impl VcfRecord {
         num_samples: &usize,
         ploidy: &mut usize,
         reference_gt: &str,
-        cols: &mut Vec<&str>,
+        cols: &Vec<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         if cols.len() < 8 {
             return Err("Not enough columns in VCF line".into());
@@ -113,7 +113,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
     let mut num_samples: usize = 0;
     let mut ploidy: usize = 2;
     let reference_gt = vec!["0"; ploidy].join("/");
-    let mut fields: Vec<&str>;
+
     while reader.read_line(&mut line)? > 0 {
         if line.starts_with("##") {
         } else if line.starts_with("#CHROM") {
@@ -126,8 +126,10 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
             if num_samples == 0 {
                 return Err("Num. samples not initialized. Possible missing #CHROM line".into());
             }
-            fields = line.trim_end().split('\t').collect();
-            let _ = VcfRecord::from_line(&num_samples, &mut ploidy, &reference_gt, &mut fields);
+
+            let fields = line.trim_end().split('\t').collect();
+
+            let _ = VcfRecord::from_line(&num_samples, &mut ploidy, &reference_gt, &fields);
         };
         line.clear();
     }
