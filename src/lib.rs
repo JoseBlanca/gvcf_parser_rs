@@ -43,13 +43,14 @@ fn digit_str_to_int(s: &str) -> i32 {
 impl VcfRecord {
     pub fn from_line(
         num_samples: &usize,
-        ploidy: &mut usize,
+        ploidy: usize,
         reference_gt: &str,
         cols: &Vec<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         if cols.len() < 8 {
             return Err("Not enough columns in VCF line".into());
         }
+
         let ref_allele = cols[3];
         let alt_alleles = cols[4];
         let alleles: Vec<String>;
@@ -69,7 +70,7 @@ impl VcfRecord {
             .position(|f| f == "GT")
             .ok_or("GT field not found in FORMAT")?;
 
-        let mut genotypes: Vec<i32> = vec![0; num_samples * *ploidy];
+        let mut genotypes: Vec<i32> = vec![0; num_samples * ploidy];
         for (sample_idx, sample_field) in cols[9..].iter().enumerate() {
             if gt_idx == 0 && sample_field.starts_with(reference_gt) {
                 continue;
@@ -92,7 +93,7 @@ impl VcfRecord {
                     &mut genotypes,
                     sample_idx,
                     allele_idx,
-                    *ploidy,
+                    ploidy,
                     digit_str_to_int(allele_str),
                 );
             }
@@ -111,7 +112,7 @@ impl VcfRecord {
 pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
     let mut line = String::new();
     let mut num_samples: usize = 0;
-    let mut ploidy: usize = 2;
+    let ploidy: usize = 2;
     let reference_gt = vec!["0"; ploidy].join("/");
 
     while reader.read_line(&mut line)? > 0 {
@@ -129,7 +130,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
 
             let fields = line.trim_end().split('\t').collect();
 
-            let _ = VcfRecord::from_line(&num_samples, &mut ploidy, &reference_gt, &fields);
+            let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &fields);
         };
         line.clear();
     }
