@@ -66,10 +66,7 @@ impl VcfRecord {
 
         let qual = cols[5].parse::<f32>()?;
 
-        let gt_idx = cols[8]
-            .split(":")
-            .position(|f| f == "GT")
-            .ok_or("GT field not found in FORMAT")?;
+        let gt_idx = get_gt_index_from_format_field(&cols)?;
 
         let mut genotypes: Vec<i32> = vec![0; num_samples * ploidy];
         let mut observed_ploidy: Option<usize> = None;
@@ -87,6 +84,13 @@ impl VcfRecord {
                 observed_ploidy = Some(ploidy);
                 continue;
             };
+
+            if gt_str == "." {
+                for allele_idx in 0..ploidy {
+                    set_gt(&mut genotypes, sample_idx, allele_idx, ploidy, MISSING_GT);
+                }
+                continue;
+            }
 
             let mut allele_idx: usize = 0;
             for allele_str in gt_str.split(|c| c == '/' || c == '|') {
@@ -172,6 +176,7 @@ pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Er
         match section {
             VcfSection::Body => {
                 let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &line);
+                //println!("{:?}", _result);
             }
             VcfSection::FirstVariation => {
                 ploidy = look_for_ploidy(&line)?;
