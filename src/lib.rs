@@ -72,6 +72,7 @@ impl VcfRecord {
             .ok_or("GT field not found in FORMAT")?;
 
         let mut genotypes: Vec<i32> = vec![0; num_samples * ploidy];
+        let mut observed_ploidy: Option<usize> = None;
         for (sample_idx, sample_field) in cols[9..].iter().enumerate() {
             if gt_idx == 0 && sample_field.starts_with(reference_gt) {
                 continue;
@@ -83,11 +84,14 @@ impl VcfRecord {
                 )
             })?;
             if gt_str == reference_gt {
+                observed_ploidy = Some(ploidy);
                 continue;
             };
 
-            for (allele_idx, allele_str) in gt_str.split(|c| c == '/' || c == '|').enumerate() {
+            let mut allele_idx: usize = 0;
+            for allele_str in gt_str.split(|c| c == '/' || c == '|') {
                 if allele_str == "0" {
+                    allele_idx += 1;
                     continue;
                 };
                 set_gt(
@@ -97,6 +101,20 @@ impl VcfRecord {
                     ploidy,
                     digit_str_to_int(allele_str),
                 );
+                allele_idx += 1;
+            }
+            if let Some(value) = observed_ploidy {
+                if value != allele_idx {
+                    return Err("Inconsistent observed ploidies in a variant".into());
+                }
+            } else {
+                observed_ploidy = Some(allele_idx);
+            }
+        }
+
+        if let Some(value) = observed_ploidy {
+            if value != ploidy {
+                return Err("observed ploidy different than given ploidy".into());
             }
         }
 
