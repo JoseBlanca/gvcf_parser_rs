@@ -64,7 +64,10 @@ impl VcfRecord {
                 .collect();
         }
 
-        let qual = cols[5].parse::<f32>()?;
+        let qual = match cols[5] {
+            "." => f32::NAN,
+            s => s.parse::<f32>()?,
+        };
 
         let gt_idx = get_gt_index_from_format_field(&cols)?;
 
@@ -161,45 +164,99 @@ fn look_for_ploidy(line: &str) -> Result<usize, Box<dyn Error>> {
 #[derive(Debug, PartialEq, Eq)]
 enum VcfSection {
     Header,
-    FirstVariation,
     Body,
 }
 
-pub fn parse_vcf<R: BufRead>(mut reader: R) -> Result<Vec<VcfRecord>, Box<dyn Error>> {
-    let mut line = String::new();
-    let mut section = VcfSection::Header;
-    let mut num_samples: usize = 0;
-    let mut ploidy: usize = 0;
-    let mut reference_gt = String::from("");
+pub struct VcfRecordIterator<R: BufRead> {
+    reader: R,
+    line: String,
+    section: VcfSection,
+    num_samples: usize,
+    ploidy: usize,
+    reference_gt: String,
+}
 
-    while reader.read_line(&mut line)? > 0 {
-        match section {
-            VcfSection::Body => {
-                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &line);
-                //println!("{:?}", _result);
-            }
-            VcfSection::FirstVariation => {
-                ploidy = look_for_ploidy(&line)?;
-                reference_gt = vec!["0"; ploidy].join("/");
-
-                let _result = VcfRecord::from_line(&num_samples, ploidy, &reference_gt, &line);
-                section = VcfSection::Body;
-            }
-            VcfSection::Header => {
-                if line.starts_with("##") {
-                } else if line.starts_with("#CHROM") {
-                    let fields_: Vec<&str> = line.trim_end().split('\t').collect();
-                    if fields_.len() < 9 {
-                        return Err("Not enough fields found in the CROM line".into());
-                    }
-                    num_samples = fields_.len() - 9;
-                    section = VcfSection::FirstVariation;
-                }
-            }
+impl<R: BufRead> VcfRecordIterator<R> {
+    pub fn new(reader: R) -> Self {
+        VcfRecordIterator {
+            reader,
+            line: String::new(),
+            section: VcfSection::Header,
+            num_samples: 0,
+            ploidy: 0,
+            reference_gt: String::new(),
         }
-        line.clear();
     }
-    Err("Finished reading".into())
+}
+
+impl<R: BufRead> Iterator for VcfRecordIterator<R> {
+    type Item = Result<VcfRecord, Box<dyn Error>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.line.clear();
+
+        match self.reader.read_line(&mut self.line) {
+            Ok(0) => None, // EOF
+            Ok(_) => {
+                match self.section {
+                    VcfSection::Body => {
+                        match VcfRecord::from_line(
+                            &self.num_samples,
+                            self.ploidy,
+                            &self.reference_gt,
+                            &self.line,
+                        ) {
+                            Ok(record) => return Some(Ok(record)),
+                            Err(e) => return Some(Err(e)),
+                        }
+                    }
+                    VcfSection::Header => {
+                        loop {
+                            if self.line.starts_with("##") {
+                                // Skip header lines, continue to next iteration
+                            } else if self.line.starts_with("#CHROM") {
+                                let fields_: Vec<&str> = self.line.trim_end().split('\t').collect();
+                                if fields_.len() < 9 {
+                                    return Some(Err(
+                                        "Not enough fields found in the CHROM line".into()
+                                    ));
+                                }
+                                self.num_samples = fields_.len() - 9;
+                            } else {
+                                match look_for_ploidy(&self.line) {
+                                    Ok(ploidy) => self.ploidy = ploidy,
+                                    Err(e) => return Some(Err(e)),
+                                };
+                                self.reference_gt = vec!["0"; self.ploidy].join("/");
+                                self.section = VcfSection::Body;
+                                let record = VcfRecord::from_line(
+                                    &self.num_samples,
+                                    self.ploidy,
+                                    &self.reference_gt,
+                                    &self.line,
+                                );
+                                self.line.clear();
+                                return Some(record);
+                            }
+                            self.line.clear();
+                            match self.reader.read_line(&mut self.line) {
+                                Ok(0) => return None, // EOF
+                                Ok(_) => {
+                                    continue;
+                                }
+                                Err(e) => return Some(Err(Box::new(e))),
+                            }
+                        }
+                    }
+                };
+            }
+            Err(e) => Some(Err(Box::new(e))),
+        }
+    }
+}
+
+pub fn parse_vcf_iter<R: BufRead>(reader: R) -> VcfRecordIterator<R> {
+    VcfRecordIterator::new(reader)
 }
 
 #[cfg(test)]
@@ -235,13 +292,28 @@ mod tests {
 
     #[test]
     //#[ignore]
-    fn test_parse_vcf() {
+    fn test_parse_vcf_iter() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
-        let _res = parse_vcf(reader);
+        let parser = parse_vcf_iter(reader);
+
+        let mut count = 0;
+        for record_result in parser {
+            match record_result {
+                Ok(_record) => {
+                    count += 1;
+                }
+                Err(e) => {
+                    eprintln!("Error parsing record {}: {}", count, e);
+                    break;
+                }
+            }
+        }
+        assert_eq!(count, 6);
     }
+
     #[test]
     //#[ignore]
-    fn test_parse_vcf_gz_file() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_parse_vcf_gz_file_iter() -> Result<(), Box<dyn std::error::Error>> {
         use rust_htslib::bgzf::Reader as BgzfReader;
         use rust_htslib::tpool::ThreadPool;
         let n_threads = 4;
@@ -251,8 +323,21 @@ mod tests {
         raw_reader.set_thread_pool(&pool)?;
 
         let reader = BufReader::new(raw_reader);
+        let parser = parse_vcf_iter(reader);
 
-        let _res = parse_vcf(reader);
+        let mut count = 0;
+        for record_result in parser {
+            match record_result {
+                Ok(_record) => {
+                    count += 1;
+                }
+                Err(e) => {
+                    eprintln!("Error parsing record {}: {}", count, e);
+                    break;
+                }
+            }
+        }
+        assert_eq!(count, 4249);
         Ok(())
     }
 }
