@@ -187,6 +187,66 @@ impl<R: BufRead> VcfRecordIterator<R> {
             reference_gt: String::new(),
         }
     }
+
+    fn parse_variant(&self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
+        let record = VcfRecord::from_line(
+            &self.num_samples,
+            self.ploidy,
+            &self.reference_gt,
+            &self.line,
+        );
+        Some(record)
+    }
+
+    fn process_chrom_line(&mut self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
+        let fields_: Vec<&str> = self.line.trim_end().split('\t').collect();
+        if fields_.len() < 9 {
+            return Some(Err("Not enough fields found in the CHROM line".into()));
+        }
+        self.num_samples = fields_.len() - 9;
+        None // Continue processing, don't return a record yet
+    }
+
+    fn process_first_variant_line(&mut self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
+        // Set up ploidy and reference genotype
+        match look_for_ploidy(&self.line) {
+            Ok(ploidy) => self.ploidy = ploidy,
+            Err(e) => return Some(Err(e)),
+        }
+
+        self.reference_gt = vec!["0"; self.ploidy].join("/");
+        self.section = VcfSection::Body;
+
+        // Parse and return the first variant record
+        let record = VcfRecord::from_line(
+            &self.num_samples,
+            self.ploidy,
+            &self.reference_gt,
+            &self.line,
+        );
+        Some(record)
+    }
+
+    fn process_header_and_first_variant(&mut self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
+        loop {
+            match () {
+                _ if self.line.starts_with("##") => None, // Continue
+                _ if self.line.starts_with("#CHROM") => self.process_chrom_line(),
+                _ => {
+                    return self.process_first_variant_line();
+                }
+            };
+
+            self.line.clear();
+            match self.reader.read_line(&mut self.line) {
+                Ok(0) => return None, // EOF
+                Ok(_) => {
+                    continue;
+                }
+                Err(e) => return Some(Err(Box::new(e))),
+            }
+        }
+    }
 }
 
 impl<R: BufRead> Iterator for VcfRecordIterator<R> {
@@ -197,59 +257,10 @@ impl<R: BufRead> Iterator for VcfRecordIterator<R> {
 
         match self.reader.read_line(&mut self.line) {
             Ok(0) => None, // EOF
-            Ok(_) => {
-                match self.section {
-                    VcfSection::Body => {
-                        match VcfRecord::from_line(
-                            &self.num_samples,
-                            self.ploidy,
-                            &self.reference_gt,
-                            &self.line,
-                        ) {
-                            Ok(record) => return Some(Ok(record)),
-                            Err(e) => return Some(Err(e)),
-                        }
-                    }
-                    VcfSection::Header => {
-                        loop {
-                            if self.line.starts_with("##") {
-                                // Skip header lines, continue to next iteration
-                            } else if self.line.starts_with("#CHROM") {
-                                let fields_: Vec<&str> = self.line.trim_end().split('\t').collect();
-                                if fields_.len() < 9 {
-                                    return Some(Err(
-                                        "Not enough fields found in the CHROM line".into()
-                                    ));
-                                }
-                                self.num_samples = fields_.len() - 9;
-                            } else {
-                                match look_for_ploidy(&self.line) {
-                                    Ok(ploidy) => self.ploidy = ploidy,
-                                    Err(e) => return Some(Err(e)),
-                                };
-                                self.reference_gt = vec!["0"; self.ploidy].join("/");
-                                self.section = VcfSection::Body;
-                                let record = VcfRecord::from_line(
-                                    &self.num_samples,
-                                    self.ploidy,
-                                    &self.reference_gt,
-                                    &self.line,
-                                );
-                                self.line.clear();
-                                return Some(record);
-                            }
-                            self.line.clear();
-                            match self.reader.read_line(&mut self.line) {
-                                Ok(0) => return None, // EOF
-                                Ok(_) => {
-                                    continue;
-                                }
-                                Err(e) => return Some(Err(Box::new(e))),
-                            }
-                        }
-                    }
-                };
-            }
+            Ok(_) => match self.section {
+                VcfSection::Body => return self.parse_variant(),
+                VcfSection::Header => return self.process_header_and_first_variant(),
+            },
             Err(e) => Some(Err(Box::new(e))),
         }
     }
