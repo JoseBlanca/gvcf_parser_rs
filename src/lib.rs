@@ -2,7 +2,7 @@ use std::io::BufRead;
 use thiserror::Error;
 
 const MISSING_GT: i32 = -1;
-const VCF_MIN_COLUMNS: usize = 8;
+const VCF_MIN_COLUMNS: usize = 9;
 const CHROM_COLUMN: usize = 0;
 const POS_COLUMN: usize = 1;
 const REF_ALLELE_COLUMN: usize = 3;
@@ -278,10 +278,10 @@ impl<R: BufRead> VcfRecordIterator<R> {
 
     fn process_chrom_line(&mut self) -> Option<VcfResult<VcfRecord>> {
         let fields_: Vec<&str> = self.line.trim_end().split('\t').collect();
-        if fields_.len() < 9 {
+        if fields_.len() < VCF_MIN_COLUMNS {
             return Some(Err(VcfParseError::NotEnoughColumnsInChromLine));
         }
-        self.num_samples = fields_.len() - 9;
+        self.num_samples = fields_.len() - VCF_MIN_COLUMNS;
         None // Continue processing, don't return a record yet
     }
 
