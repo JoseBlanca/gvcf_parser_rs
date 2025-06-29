@@ -834,6 +834,7 @@ dependencies = [
  "flate2",
  "lru",
  "rust-htslib",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

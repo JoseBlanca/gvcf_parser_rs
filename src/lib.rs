@@ -1,5 +1,5 @@
-use std::error::Error;
 use std::io::BufRead;
+use thiserror::Error;
 
 const MISSING_GT: i32 = -1;
 const VCF_MIN_COLUMNS: usize = 8;
@@ -20,6 +20,56 @@ pub struct VcfRecord {
     pub genotypes: Vec<i32>,
 }
 
+#[derive(Error, Debug)]
+pub enum VcfParseError {
+    #[error("Invalid allele '{allele}'")]
+    InvalidAllele { allele: String },
+
+    #[error("Not enough columns in VCF in line: '{line}'")]
+    NotEnoughColumns { line: String },
+
+    #[error("Not enough columns in CHROM line")]
+    NotEnoughColumnsInChromLine,
+
+    #[error("Invalid position value '{value}' in line: '{line}'")]
+    InvalidPosition { value: String, line: String },
+
+    #[error("Invalid quality value '{value}': {line}")]
+    InvalidQuality { value: String, line: String },
+
+    #[error("Missing GT field in sample '{sample}' in line '{line}'")]
+    MissingGtField { sample: String, line: String },
+
+    #[error("FORMAT column (#8) not found in line '{line}'")]
+    FormatColumnNotFound { line: String },
+
+    #[error("GT field not found in FORMAT column in line '{line}'")]
+    MissingGtFieldInFormat { line: String },
+
+    #[error("Not possible to extract ploidy from line '{line}'")]
+    ErrorFindingPloidy { line: String },
+
+    #[error("Inconsistent ploidies found in line '{line}'")]
+    InconsistentPloidies { line: String },
+
+    #[error("Observed ({observed}) and given ({given}) ploidies are different line '{line}'")]
+    DifferentObservedPloidy {
+        line: String,
+        observed: usize,
+        given: usize,
+    },
+
+    #[error("I/O error: {source}")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+}
+// Create a new type alias for your VCF-specific results
+pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
+// Keep using Box<dyn Error> for now in functions you haven't converted yet
+pub type BoxResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 fn set_gt(
     genotypes: &mut Vec<i32>,
     sample_idx: usize,
@@ -31,12 +81,14 @@ fn set_gt(
     genotypes[pos] = value;
 }
 
-fn digit_str_to_int(allele_str: &str) -> Result<i32, Box<dyn std::error::Error>> {
+fn parse_allele(allele_str: &str) -> VcfResult<i32> {
     match allele_str {
         "." => Ok(MISSING_GT),
         _ => match allele_str.parse::<i32>() {
             Ok(allele) => Ok(allele),
-            Err(_e) => Err(format!("Invalid allele {}", allele_str).into()),
+            Err(_e) => Err(VcfParseError::InvalidAllele {
+                allele: (allele_str.to_string()),
+            }),
         },
     }
 }
@@ -47,10 +99,12 @@ impl VcfRecord {
         ploidy: usize,
         reference_gt: &str,
         line: &str,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> VcfResult<Self> {
         let cols: Vec<&str> = line.trim_end().split('\t').collect();
         if cols.len() < VCF_MIN_COLUMNS {
-            return Err("Not enough columns in VCF line".into());
+            return Err(VcfParseError::NotEnoughColumns {
+                line: (line.to_string()),
+            });
         }
 
         let ref_allele = cols[REF_ALLELE_COLUMN];
@@ -67,10 +121,15 @@ impl VcfRecord {
 
         let qual = match cols[QUAL_COLUMN] {
             "." => f32::NAN,
-            s => s.parse::<f32>()?,
+            s => s
+                .parse::<f32>()
+                .map_err(|_error| VcfParseError::InvalidQuality {
+                    value: s.to_string(),
+                    line: line.to_string(),
+                })?,
         };
 
-        let gt_idx = get_gt_index_from_format_field(&cols)?;
+        let gt_idx = get_gt_index_from_format_field(&cols, line)?;
 
         let mut genotypes: Vec<i32> = vec![0; num_samples * ploidy];
         let mut observed_ploidy: Option<usize> = None;
@@ -79,10 +138,10 @@ impl VcfRecord {
                 continue;
             };
             let gt_str = sample_field.split(':').nth(gt_idx).ok_or_else(|| {
-                format!(
-                    "Missing GT field at index {} in sample '{}'",
-                    gt_idx, sample_field
-                )
+                VcfParseError::MissingGtField {
+                    sample: sample_field.to_string(),
+                    line: line.to_string(),
+                }
             })?;
             if gt_str == reference_gt {
                 observed_ploidy = Some(ploidy);
@@ -107,13 +166,15 @@ impl VcfRecord {
                     sample_idx,
                     allele_idx,
                     ploidy,
-                    digit_str_to_int(allele_str)?,
+                    parse_allele(allele_str)?,
                 );
                 allele_idx += 1;
             }
             if let Some(value) = observed_ploidy {
                 if value != allele_idx {
-                    return Err("Inconsistent observed ploidies in a variant".into());
+                    return Err(VcfParseError::InconsistentPloidies {
+                        line: line.to_string(),
+                    });
                 }
             } else {
                 observed_ploidy = Some(allele_idx);
@@ -122,13 +183,22 @@ impl VcfRecord {
 
         if let Some(value) = observed_ploidy {
             if value != ploidy {
-                return Err("observed ploidy different than given ploidy".into());
+                return Err(VcfParseError::DifferentObservedPloidy {
+                    line: line.to_string(),
+                    observed: value,
+                    given: ploidy,
+                });
             }
         }
 
         Ok(VcfRecord {
             chrom: cols[CHROM_COLUMN].to_string(),
-            pos: cols[POS_COLUMN].parse()?,
+            pos: cols[POS_COLUMN]
+                .parse()
+                .map_err(|_e| VcfParseError::InvalidPosition {
+                    value: cols[POS_COLUMN].to_string(),
+                    line: line.to_string(),
+                })?,
             alleles,
             qual,
             genotypes,
@@ -136,30 +206,38 @@ impl VcfRecord {
     }
 }
 
-fn get_gt_index_from_format_field(cols: &[&str]) -> Result<usize, Box<dyn Error>> {
+fn get_gt_index_from_format_field(cols: &[&str], line: &str) -> VcfResult<usize> {
     cols.get(FORMAT_COLUMN)
-        .ok_or("FORMAT column (#8) not found")?
+        .ok_or(VcfParseError::FormatColumnNotFound {
+            line: line.to_string(),
+        })?
         .split(":")
         .position(|f| f == "GT")
-        .ok_or("GT field not found in FORMAT".into())
+        .ok_or(VcfParseError::MissingGtFieldInFormat {
+            line: line.to_string(),
+        })
 }
 
-fn look_for_ploidy(line: &str) -> Result<usize, Box<dyn Error>> {
+fn look_for_ploidy(line: &str) -> VcfResult<usize> {
     let cols: Vec<&str> = line.trim_end().split('\t').collect();
-    let gt_idx = get_gt_index_from_format_field(&cols)?;
+    let gt_idx = get_gt_index_from_format_field(&cols, line)?;
     for sample_field in &cols[FIRST_SAMPLE_COLUMN..] {
-        let gt_str = sample_field.split(':').nth(gt_idx).ok_or_else(|| {
-            format!(
-                "Missing GT field at index {} in sample '{}'",
-                gt_idx, sample_field
-            )
-        })?;
+        let gt_str =
+            sample_field
+                .split(':')
+                .nth(gt_idx)
+                .ok_or_else(|| VcfParseError::MissingGtField {
+                    sample: sample_field.to_string(),
+                    line: line.to_string(),
+                })?;
         if gt_str == "." {
             continue;
         };
         return Ok(gt_str.split(|c| c == '/' || c == '|').count());
     }
-    Err("It was not possible to determine ploidy".into())
+    Err(VcfParseError::ErrorFindingPloidy {
+        line: line.to_string(),
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -189,26 +267,25 @@ impl<R: BufRead> VcfRecordIterator<R> {
         }
     }
 
-    fn parse_variant(&self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
-        let record = VcfRecord::from_line(
+    fn parse_variant(&self) -> VcfResult<VcfRecord> {
+        VcfRecord::from_line(
             self.num_samples,
             self.ploidy,
             &self.reference_gt,
             &self.line,
-        );
-        Some(record)
+        )
     }
 
-    fn process_chrom_line(&mut self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
+    fn process_chrom_line(&mut self) -> Option<VcfResult<VcfRecord>> {
         let fields_: Vec<&str> = self.line.trim_end().split('\t').collect();
         if fields_.len() < 9 {
-            return Some(Err("Not enough fields found in the CHROM line".into()));
+            return Some(Err(VcfParseError::NotEnoughColumnsInChromLine));
         }
         self.num_samples = fields_.len() - 9;
         None // Continue processing, don't return a record yet
     }
 
-    fn process_first_variant_line(&mut self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
+    fn process_first_variant_line(&mut self) -> Option<VcfResult<VcfRecord>> {
         // Set up ploidy and reference genotype
         match look_for_ploidy(&self.line) {
             Ok(ploidy) => self.ploidy = ploidy,
@@ -228,7 +305,7 @@ impl<R: BufRead> VcfRecordIterator<R> {
         Some(record)
     }
 
-    fn process_header_and_first_variant(&mut self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
+    fn process_header_and_first_variant(&mut self) -> Option<VcfResult<VcfRecord>> {
         loop {
             match () {
                 _ if self.line.starts_with("##") => None, // Continue
@@ -244,14 +321,14 @@ impl<R: BufRead> VcfRecordIterator<R> {
                 Ok(_) => {
                     continue;
                 }
-                Err(e) => return Some(Err(Box::new(e))),
+                Err(e) => return Some(Err(VcfParseError::Io { source: e })),
             }
         }
     }
 }
 
 impl<R: BufRead> Iterator for VcfRecordIterator<R> {
-    type Item = Result<VcfRecord, Box<dyn Error>>;
+    type Item = VcfResult<VcfRecord>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.line.clear();
@@ -259,10 +336,10 @@ impl<R: BufRead> Iterator for VcfRecordIterator<R> {
         match self.reader.read_line(&mut self.line) {
             Ok(0) => None, // EOF
             Ok(_) => match self.section {
-                VcfSection::Body => return self.parse_variant(),
+                VcfSection::Body => return Some(self.parse_variant()),
                 VcfSection::Header => return self.process_header_and_first_variant(),
             },
-            Err(e) => Some(Err(Box::new(e))),
+            Err(error) => Some(Err(VcfParseError::from(error))),
         }
     }
 }
