@@ -2,6 +2,14 @@ use std::error::Error;
 use std::io::BufRead;
 
 const MISSING_GT: i32 = -1;
+const VCF_MIN_COLUMNS: usize = 8;
+const CHROM_COLUMN: usize = 0;
+const POS_COLUMN: usize = 1;
+const REF_ALLELE_COLUMN: usize = 3;
+const ALT_ALLELE_COLUMN: usize = 4;
+const QUAL_COLUMN: usize = 5;
+const FORMAT_COLUMN: usize = 8;
+const FIRST_SAMPLE_COLUMN: usize = 9;
 
 #[derive(Debug)]
 pub struct VcfRecord {
@@ -23,37 +31,30 @@ fn set_gt(
     genotypes[pos] = value;
 }
 
-fn digit_str_to_int(s: &str) -> i32 {
-    match s {
-        "." => MISSING_GT,
-        "0" => 0,
-        "1" => 1,
-        "2" => 2,
-        "3" => 3,
-        "4" => 4,
-        "5" => 5,
-        "6" => 6,
-        "7" => 7,
-        "8" => 8,
-        "9" => 9,
-        allele => allele.parse::<i32>().unwrap_or(MISSING_GT),
+fn digit_str_to_int(allele_str: &str) -> Result<i32, Box<dyn std::error::Error>> {
+    match allele_str {
+        "." => Ok(MISSING_GT),
+        _ => match allele_str.parse::<i32>() {
+            Ok(allele) => Ok(allele),
+            Err(_e) => Err(format!("Invalid allele {}", allele_str).into()),
+        },
     }
 }
 
 impl VcfRecord {
     pub fn from_line(
-        num_samples: &usize,
+        num_samples: usize,
         ploidy: usize,
         reference_gt: &str,
         line: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let cols: Vec<&str> = line.trim_end().split('\t').collect();
-        if cols.len() < 8 {
+        if cols.len() < VCF_MIN_COLUMNS {
             return Err("Not enough columns in VCF line".into());
         }
 
-        let ref_allele = cols[3];
-        let alt_alleles = cols[4];
+        let ref_allele = cols[REF_ALLELE_COLUMN];
+        let alt_alleles = cols[ALT_ALLELE_COLUMN];
         let alleles: Vec<String>;
         if alt_alleles == "." {
             alleles = std::iter::once(ref_allele).map(str::to_string).collect();
@@ -64,7 +65,7 @@ impl VcfRecord {
                 .collect();
         }
 
-        let qual = match cols[5] {
+        let qual = match cols[QUAL_COLUMN] {
             "." => f32::NAN,
             s => s.parse::<f32>()?,
         };
@@ -73,7 +74,7 @@ impl VcfRecord {
 
         let mut genotypes: Vec<i32> = vec![0; num_samples * ploidy];
         let mut observed_ploidy: Option<usize> = None;
-        for (sample_idx, sample_field) in cols[9..].iter().enumerate() {
+        for (sample_idx, sample_field) in cols[FIRST_SAMPLE_COLUMN..].iter().enumerate() {
             if gt_idx == 0 && sample_field.starts_with(reference_gt) {
                 continue;
             };
@@ -106,7 +107,7 @@ impl VcfRecord {
                     sample_idx,
                     allele_idx,
                     ploidy,
-                    digit_str_to_int(allele_str),
+                    digit_str_to_int(allele_str)?,
                 );
                 allele_idx += 1;
             }
@@ -126,8 +127,8 @@ impl VcfRecord {
         }
 
         Ok(VcfRecord {
-            chrom: cols[0].to_string(),
-            pos: cols[1].parse()?,
+            chrom: cols[CHROM_COLUMN].to_string(),
+            pos: cols[POS_COLUMN].parse()?,
             alleles,
             qual,
             genotypes,
@@ -136,7 +137,7 @@ impl VcfRecord {
 }
 
 fn get_gt_index_from_format_field(cols: &[&str]) -> Result<usize, Box<dyn Error>> {
-    cols.get(8)
+    cols.get(FORMAT_COLUMN)
         .ok_or("FORMAT column (#8) not found")?
         .split(":")
         .position(|f| f == "GT")
@@ -146,7 +147,7 @@ fn get_gt_index_from_format_field(cols: &[&str]) -> Result<usize, Box<dyn Error>
 fn look_for_ploidy(line: &str) -> Result<usize, Box<dyn Error>> {
     let cols: Vec<&str> = line.trim_end().split('\t').collect();
     let gt_idx = get_gt_index_from_format_field(&cols)?;
-    for sample_field in &cols[9..] {
+    for sample_field in &cols[FIRST_SAMPLE_COLUMN..] {
         let gt_str = sample_field.split(':').nth(gt_idx).ok_or_else(|| {
             format!(
                 "Missing GT field at index {} in sample '{}'",
@@ -190,7 +191,7 @@ impl<R: BufRead> VcfRecordIterator<R> {
 
     fn parse_variant(&self) -> Option<Result<VcfRecord, Box<dyn Error>>> {
         let record = VcfRecord::from_line(
-            &self.num_samples,
+            self.num_samples,
             self.ploidy,
             &self.reference_gt,
             &self.line,
@@ -219,7 +220,7 @@ impl<R: BufRead> VcfRecordIterator<R> {
 
         // Parse and return the first variant record
         let record = VcfRecord::from_line(
-            &self.num_samples,
+            self.num_samples,
             self.ploidy,
             &self.reference_gt,
             &self.line,
