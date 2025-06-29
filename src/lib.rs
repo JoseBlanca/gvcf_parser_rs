@@ -25,10 +25,10 @@ pub enum VcfParseError {
     #[error("Invalid allele '{allele}'")]
     InvalidAllele { allele: String },
 
-    #[error("Not enough columns in VCF in line: '{line}'")]
+    #[error("Insufficient columns in VCF line: '{line}'")]
     NotEnoughColumns { line: String },
 
-    #[error("Not enough columns in CHROM line")]
+    #[error("Insufficient columns in CHROM header line")]
     NotEnoughColumnsInChromLine,
 
     #[error("Invalid position value '{value}' in line: '{line}'")]
