@@ -65,10 +65,7 @@ pub enum VcfParseError {
         source: std::io::Error,
     },
 }
-// Create a new type alias for your VCF-specific results
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
-// Keep using Box<dyn Error> for now in functions you haven't converted yet
-pub type BoxResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn set_gt(
     genotypes: &mut Vec<i32>,
