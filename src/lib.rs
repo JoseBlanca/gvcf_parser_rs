@@ -1,4 +1,7 @@
-use std::io::BufRead;
+use rust_htslib::bgzf::Reader as BgzfReader;
+use rust_htslib::tpool::ThreadPool;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 use thiserror::Error;
 
 const MISSING_GT: i32 = -1;
@@ -64,6 +67,12 @@ pub enum VcfParseError {
         #[from]
         source: std::io::Error,
     },
+
+    #[error("I/O error creating the ThreadPool to decompress the VCF file")]
+    ThreadPoolError,
+
+    #[error("I/O error opening path: '{path}'")]
+    PathError { path: String },
 }
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
 
@@ -299,6 +308,7 @@ impl<R: BufRead> VcfRecordIterator<R> {
             &self.reference_gt,
             &self.line,
         );
+        self.section = VcfSection::Body;
         Some(record)
     }
 
@@ -330,19 +340,42 @@ impl<R: BufRead> Iterator for VcfRecordIterator<R> {
     fn next(&mut self) -> Option<Self::Item> {
         self.line.clear();
 
-        match self.reader.read_line(&mut self.line) {
+        let result = match self.reader.read_line(&mut self.line) {
             Ok(0) => None, // EOF
             Ok(_) => match self.section {
                 VcfSection::Body => return Some(self.parse_variant()),
                 VcfSection::Header => return self.process_header_and_first_variant(),
             },
             Err(error) => Some(Err(VcfParseError::from(error))),
-        }
+        };
+        return result;
     }
 }
 
-pub fn parse_vcf_iter<R: BufRead>(reader: R) -> VcfRecordIterator<R> {
+pub fn parse_vcf<R: BufRead>(reader: R) -> VcfRecordIterator<R> {
     VcfRecordIterator::new(reader)
+}
+
+pub fn parse_vcf_from_path<P: AsRef<Path>>(
+    path: P,
+    n_threads: u32,
+) -> VcfResult<(
+    VcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>>,
+    ThreadPool,
+)> {
+    let mut raw_reader = BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
+        path: path.as_ref().to_string_lossy().into_owned(),
+    })?;
+
+    let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
+    raw_reader
+        .set_thread_pool(&pool)
+        .map_err(|_e| VcfParseError::ThreadPoolError)?;
+
+    let reader = BufReader::new(raw_reader);
+    let parser = parse_vcf(reader);
+
+    Ok((parser, pool))
 }
 
 #[cfg(test)]
@@ -380,7 +413,7 @@ mod tests {
     //#[ignore]
     fn test_parse_vcf_iter() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
-        let parser = parse_vcf_iter(reader);
+        let parser = parse_vcf(reader);
 
         let mut count = 0;
         for record_result in parser {
@@ -400,16 +433,8 @@ mod tests {
     #[test]
     //#[ignore]
     fn test_parse_vcf_gz_file_iter() -> Result<(), Box<dyn std::error::Error>> {
-        use rust_htslib::bgzf::Reader as BgzfReader;
-        use rust_htslib::tpool::ThreadPool;
-        let n_threads = 4;
-        let pool = ThreadPool::new(n_threads)?;
-        let file_name = "/home/jose/analyses/g2psol/source_data/TS.vcf.gz";
-        let mut raw_reader = BgzfReader::from_path(file_name)?;
-        raw_reader.set_thread_pool(&pool)?;
-
-        let reader = BufReader::new(raw_reader);
-        let parser = parse_vcf_iter(reader);
+        let result = parse_vcf_from_path("/home/jose/analyses/g2psol/source_data/TS.vcf.gz", 4)?;
+        let (parser, pool) = result;
 
         let mut count = 0;
         for record_result in parser {
