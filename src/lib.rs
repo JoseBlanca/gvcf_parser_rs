@@ -1,6 +1,6 @@
 use rust_htslib::bgzf::Reader as BgzfReader;
 use rust_htslib::tpool::ThreadPool;
-use std::io::{stdin, BufRead, BufReader, Read, Stdin};
+use std::io::{BufRead, BufReader, Read, Stdin};
 use std::path::Path;
 use thiserror::Error;
 
@@ -13,15 +13,6 @@ const ALT_ALLELE_COLUMN: usize = 4;
 const QUAL_COLUMN: usize = 5;
 const FORMAT_COLUMN: usize = 8;
 const FIRST_SAMPLE_COLUMN: usize = 9;
-
-#[derive(Debug)]
-pub struct VcfRecord {
-    pub chrom: String,
-    pub pos: u32,
-    pub alleles: Vec<String>,
-    pub qual: f32,
-    pub genotypes: Vec<i32>,
-}
 
 #[derive(Error, Debug)]
 pub enum VcfParseError {
@@ -74,6 +65,7 @@ pub enum VcfParseError {
     #[error("I/O error opening path: '{path}'")]
     PathError { path: String },
 }
+
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
 
 fn set_gt(
@@ -97,6 +89,54 @@ fn parse_allele(allele_str: &str) -> VcfResult<i32> {
             }),
         },
     }
+}
+
+fn get_gt_index_from_format_field(cols: &[&str], line: &str) -> VcfResult<usize> {
+    cols.get(FORMAT_COLUMN)
+        .ok_or(VcfParseError::FormatColumnNotFound {
+            line: line.to_string(),
+        })?
+        .split(":")
+        .position(|f| f == "GT")
+        .ok_or(VcfParseError::MissingGtFieldInFormat {
+            line: line.to_string(),
+        })
+}
+
+fn look_for_ploidy(line: &str) -> VcfResult<usize> {
+    let cols: Vec<&str> = line.trim_end().split('\t').collect();
+    let gt_idx = get_gt_index_from_format_field(&cols, line)?;
+    for sample_field in &cols[FIRST_SAMPLE_COLUMN..] {
+        let gt_str =
+            sample_field
+                .split(':')
+                .nth(gt_idx)
+                .ok_or_else(|| VcfParseError::MissingGtField {
+                    sample: sample_field.to_string(),
+                    line: line.to_string(),
+                })?;
+        if gt_str == "." {
+            continue;
+        };
+        return Ok(gt_str.split(|c| c == '/' || c == '|').count());
+    }
+    Err(VcfParseError::ErrorFindingPloidy {
+        line: line.to_string(),
+    })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum VcfSection {
+    Header,
+    Body,
+}
+#[derive(Debug)]
+pub struct VcfRecord {
+    pub chrom: String,
+    pub pos: u32,
+    pub alleles: Vec<String>,
+    pub qual: f32,
+    pub genotypes: Vec<i32>,
 }
 
 impl VcfRecord {
@@ -212,46 +252,6 @@ impl VcfRecord {
     }
 }
 
-fn get_gt_index_from_format_field(cols: &[&str], line: &str) -> VcfResult<usize> {
-    cols.get(FORMAT_COLUMN)
-        .ok_or(VcfParseError::FormatColumnNotFound {
-            line: line.to_string(),
-        })?
-        .split(":")
-        .position(|f| f == "GT")
-        .ok_or(VcfParseError::MissingGtFieldInFormat {
-            line: line.to_string(),
-        })
-}
-
-fn look_for_ploidy(line: &str) -> VcfResult<usize> {
-    let cols: Vec<&str> = line.trim_end().split('\t').collect();
-    let gt_idx = get_gt_index_from_format_field(&cols, line)?;
-    for sample_field in &cols[FIRST_SAMPLE_COLUMN..] {
-        let gt_str =
-            sample_field
-                .split(':')
-                .nth(gt_idx)
-                .ok_or_else(|| VcfParseError::MissingGtField {
-                    sample: sample_field.to_string(),
-                    line: line.to_string(),
-                })?;
-        if gt_str == "." {
-            continue;
-        };
-        return Ok(gt_str.split(|c| c == '/' || c == '|').count());
-    }
-    Err(VcfParseError::ErrorFindingPloidy {
-        line: line.to_string(),
-    })
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum VcfSection {
-    Header,
-    Body,
-}
-
 pub struct VcfRecordIterator<R: BufRead> {
     reader: R,
     line: String,
@@ -262,7 +262,7 @@ pub struct VcfRecordIterator<R: BufRead> {
 }
 
 impl<R: BufRead> VcfRecordIterator<R> {
-    pub fn new(reader: R) -> Self {
+    fn new(reader: R) -> Self {
         VcfRecordIterator {
             reader,
             line: String::new(),
@@ -352,34 +352,36 @@ impl<R: BufRead> Iterator for VcfRecordIterator<R> {
     }
 }
 
-pub fn parse_vcf_from_reader<R: Read>(reader: R) -> VcfRecordIterator<BufReader<R>> {
-    let buf_reader = BufReader::new(reader);
-    VcfRecordIterator::new(buf_reader)
+impl<R: Read> VcfRecordIterator<BufReader<R>> {
+    pub fn from_reader(reader: R) -> Self {
+        let buf_reader = BufReader::new(reader);
+        VcfRecordIterator::new(buf_reader)
+    }
 }
 
-pub fn parse_vcf_from_path<P: AsRef<Path>>(
-    path: P,
-    n_threads: u32,
-) -> VcfResult<(
-    VcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>>,
-    ThreadPool,
-)> {
-    let mut reader = BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
-        path: path.as_ref().to_string_lossy().into_owned(),
-    })?;
+impl VcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>> {
+    pub fn from_path<P: AsRef<Path>>(path: P, n_threads: u32) -> VcfResult<(Self, ThreadPool)> {
+        let mut reader = BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
+            path: path.as_ref().to_string_lossy().into_owned(),
+        })?;
 
-    let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
-    reader
-        .set_thread_pool(&pool)
-        .map_err(|_e| VcfParseError::ThreadPoolError)?;
+        let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
+        reader
+            .set_thread_pool(&pool)
+            .map_err(|_e| VcfParseError::ThreadPoolError)?;
 
-    let parser = parse_vcf_from_reader(reader);
+        let parser = Self::from_reader(reader);
 
-    Ok((parser, pool))
+        Ok((parser, pool))
+    }
 }
 
-pub fn parse_vcf_from_stdin() -> VcfRecordIterator<BufReader<Stdin>> {
-    parse_vcf_from_reader(stdin())
+impl VcfRecordIterator<BufReader<std::io::Stdin>> {
+    pub fn from_stdin() -> VcfRecordIterator<BufReader<Stdin>> {
+        let stdin = std::io::stdin();
+        let reader = BufReader::new(stdin);
+        Self::new(reader)
+    }
 }
 
 #[cfg(test)]
@@ -417,7 +419,7 @@ mod tests {
     //#[ignore]
     fn test_parse_vcf_iter() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
-        let parser = parse_vcf_from_reader(reader);
+        let parser = VcfRecordIterator::from_reader(reader);
 
         let mut count = 0;
         for record_result in parser {
@@ -437,7 +439,8 @@ mod tests {
     #[test]
     //#[ignore]
     fn test_parse_vcf_gz_file_iter() -> Result<(), Box<dyn std::error::Error>> {
-        let result = parse_vcf_from_path("/home/jose/analyses/g2psol/source_data/TS.vcf.gz", 4)?;
+        let result =
+            VcfRecordIterator::from_path("/home/jose/analyses/g2psol/source_data/TS.vcf.gz", 4)?;
         let (parser, _pool) = result;
 
         let mut count = 0;
