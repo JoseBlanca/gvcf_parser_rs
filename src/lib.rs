@@ -1,6 +1,6 @@
 use rust_htslib::bgzf::Reader as BgzfReader;
 use rust_htslib::tpool::ThreadPool;
-use std::io::{BufRead, BufReader};
+use std::io::{stdin, BufRead, BufReader, Read, Stdin};
 use std::path::Path;
 use thiserror::Error;
 
@@ -352,8 +352,9 @@ impl<R: BufRead> Iterator for VcfRecordIterator<R> {
     }
 }
 
-pub fn parse_vcf<R: BufRead>(reader: R) -> VcfRecordIterator<R> {
-    VcfRecordIterator::new(reader)
+pub fn parse_vcf_from_reader<R: Read>(reader: R) -> VcfRecordIterator<BufReader<R>> {
+    let buf_reader = BufReader::new(reader);
+    VcfRecordIterator::new(buf_reader)
 }
 
 pub fn parse_vcf_from_path<P: AsRef<Path>>(
@@ -363,19 +364,22 @@ pub fn parse_vcf_from_path<P: AsRef<Path>>(
     VcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>>,
     ThreadPool,
 )> {
-    let mut raw_reader = BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
+    let mut reader = BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
         path: path.as_ref().to_string_lossy().into_owned(),
     })?;
 
     let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
-    raw_reader
+    reader
         .set_thread_pool(&pool)
         .map_err(|_e| VcfParseError::ThreadPoolError)?;
 
-    let reader = BufReader::new(raw_reader);
-    let parser = parse_vcf(reader);
+    let parser = parse_vcf_from_reader(reader);
 
     Ok((parser, pool))
+}
+
+pub fn parse_vcf_from_stdin() -> VcfRecordIterator<BufReader<Stdin>> {
+    parse_vcf_from_reader(stdin())
 }
 
 #[cfg(test)]
@@ -413,7 +417,7 @@ mod tests {
     //#[ignore]
     fn test_parse_vcf_iter() {
         let reader = BufReader::new(SAMPLE_VCF.as_bytes());
-        let parser = parse_vcf(reader);
+        let parser = parse_vcf_from_reader(reader);
 
         let mut count = 0;
         for record_result in parser {
@@ -434,7 +438,7 @@ mod tests {
     //#[ignore]
     fn test_parse_vcf_gz_file_iter() -> Result<(), Box<dyn std::error::Error>> {
         let result = parse_vcf_from_path("/home/jose/analyses/g2psol/source_data/TS.vcf.gz", 4)?;
-        let (parser, pool) = result;
+        let (parser, _pool) = result;
 
         let mut count = 0;
         for record_result in parser {
