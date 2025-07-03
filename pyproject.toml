@@ -1,0 +1,18 @@
+[project]
+name = "vcf-parser-rs"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cyvcf2>=0.31.1",
+    "maturin>=1.9.0",
+    "patchelf>=0.17.2.2",
+]
+
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
