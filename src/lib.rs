@@ -71,6 +71,9 @@ pub enum VcfParseError {
 
     #[error("Gzip in stdin is not supported")]
     GzipInStdinNotSupported,
+
+    #[error("VCF file should be gzipped")]
+    VCFFileShouldBeGzipped,
 }
 
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
@@ -367,13 +370,10 @@ impl<R: Read> VcfRecordIterator<BufReader<R>> {
 }
 
 impl VcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>> {
-    pub fn from_path<P: AsRef<Path>>(
+    pub fn from_gzipped_vcf_path<P: AsRef<Path>>(
         path: P,
         n_threads: u32,
-    ) -> VcfResult<(
-        Box<dyn Iterator<Item = VcfResult<VcfRecord>>>,
-        Option<ThreadPool>,
-    )> {
+    ) -> VcfResult<(Self, Option<ThreadPool>)> {
         let file = File::open(&path)?;
         let mut buf_reader = BufReader::new(file);
 
@@ -382,23 +382,21 @@ impl VcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>> {
         let first_bytes = &buffer[..num_bytes.min(buffer.len())];
         let file_is_gzziped =
             are_gzipped_magic_bytes(first_bytes).map_err(|_| VcfParseError::MagicByteError)?;
+        if !file_is_gzziped {
+            return Err(VcfParseError::VCFFileShouldBeGzipped);
+        }
 
-        if file_is_gzziped {
-            let mut bgz_reader =
-                BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
-                    path: path.as_ref().to_string_lossy().into_owned(),
-                })?;
-            let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
-            bgz_reader
-                .set_thread_pool(&pool)
-                .map_err(|_e| VcfParseError::ThreadPoolError)?;
-            let buf_bgz_reader = BufReader::new(bgz_reader);
-            let parser = VcfRecordIterator::new(buf_bgz_reader);
-            return Ok((Box::new(parser), Some(pool)));
-        } else {
-            let parser = VcfRecordIterator::new(buf_reader);
-            return Ok((Box::new(parser), None));
-        };
+        let mut bgz_reader =
+            BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
+                path: path.as_ref().to_string_lossy().into_owned(),
+            })?;
+        let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
+        bgz_reader
+            .set_thread_pool(&pool)
+            .map_err(|_e| VcfParseError::ThreadPoolError)?;
+        let buf_bgz_reader = BufReader::new(bgz_reader);
+        let parser = VcfRecordIterator::new(buf_bgz_reader);
+        Ok((parser, Some(pool)))
     }
 }
 
@@ -489,8 +487,10 @@ mod tests {
     #[test]
     //#[ignore]
     fn test_parse_vcf_gz_file_iter() -> Result<(), Box<dyn std::error::Error>> {
-        let result =
-            VcfRecordIterator::from_path("/home/jose/analyses/g2psol/source_data/TS.vcf.gz", 4)?;
+        let result = VcfRecordIterator::from_gzipped_vcf_path(
+            "/home/jose/analyses/g2psol/source_data/TS.vcf.gz",
+            4,
+        )?;
         let (parser, _pool) = result;
 
         let mut count = 0;
