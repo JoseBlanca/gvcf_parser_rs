@@ -1,5 +1,6 @@
 use rust_htslib::bgzf::Reader as BgzfReader;
 use rust_htslib::tpool::ThreadPool;
+use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Stdin};
 use std::path::Path;
 use thiserror::Error;
@@ -64,6 +65,12 @@ pub enum VcfParseError {
 
     #[error("I/O error opening path: '{path}'")]
     PathError { path: String },
+
+    #[error("Magic byte error")]
+    MagicByteError,
+
+    #[error("Gzip in stdin is not supported")]
+    GzipInStdinNotSupported,
 }
 
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
@@ -360,28 +367,71 @@ impl<R: Read> VcfRecordIterator<BufReader<R>> {
 }
 
 impl VcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>> {
-    pub fn from_path<P: AsRef<Path>>(path: P, n_threads: u32) -> VcfResult<(Self, ThreadPool)> {
-        let mut reader = BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
-            path: path.as_ref().to_string_lossy().into_owned(),
-        })?;
+    pub fn from_path<P: AsRef<Path>>(
+        path: P,
+        n_threads: u32,
+    ) -> VcfResult<(
+        Box<dyn Iterator<Item = VcfResult<VcfRecord>>>,
+        Option<ThreadPool>,
+    )> {
+        let file = File::open(&path)?;
+        let mut buf_reader = BufReader::new(file);
 
-        let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
-        reader
-            .set_thread_pool(&pool)
-            .map_err(|_e| VcfParseError::ThreadPoolError)?;
+        let num_bytes = 4;
+        let buffer = buf_reader.fill_buf()?;
+        let first_bytes = &buffer[..num_bytes.min(buffer.len())];
+        let file_is_gzziped =
+            are_gzipped_magic_bytes(first_bytes).map_err(|_| VcfParseError::MagicByteError)?;
 
-        let parser = Self::from_reader(reader);
-
-        Ok((parser, pool))
+        if file_is_gzziped {
+            let mut bgz_reader =
+                BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
+                    path: path.as_ref().to_string_lossy().into_owned(),
+                })?;
+            let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
+            bgz_reader
+                .set_thread_pool(&pool)
+                .map_err(|_e| VcfParseError::ThreadPoolError)?;
+            let buf_bgz_reader = BufReader::new(bgz_reader);
+            let parser = VcfRecordIterator::new(buf_bgz_reader);
+            return Ok((Box::new(parser), Some(pool)));
+        } else {
+            let parser = VcfRecordIterator::new(buf_reader);
+            return Ok((Box::new(parser), None));
+        };
     }
 }
 
 impl VcfRecordIterator<BufReader<std::io::Stdin>> {
-    pub fn from_stdin() -> VcfRecordIterator<BufReader<Stdin>> {
+    pub fn from_stdin() -> VcfResult<VcfRecordIterator<BufReader<Stdin>>> {
         let stdin = std::io::stdin();
-        let reader = BufReader::new(stdin);
-        Self::new(reader)
+        let mut reader = BufReader::new(stdin);
+
+        let buffer = reader.fill_buf()?;
+        let first_bytes = &buffer[..4.min(buffer.len())];
+        let file_is_gzziped =
+            are_gzipped_magic_bytes(first_bytes).map_err(|_| VcfParseError::MagicByteError)?;
+        if file_is_gzziped {
+            return Err(VcfParseError::GzipInStdinNotSupported);
+        }
+        Ok(Self::new(reader))
     }
+}
+
+#[derive(Error, Debug)]
+pub enum MagicByteError {
+    #[error("Insufficient bytes: got {got}, need at least {need}")]
+    InsufficientBytes { got: usize, need: usize },
+}
+
+fn are_gzipped_magic_bytes(first_bytes: &[u8]) -> Result<bool, MagicByteError> {
+    if first_bytes.len() < 2 {
+        return Err(MagicByteError::InsufficientBytes {
+            got: first_bytes.len(),
+            need: 2,
+        });
+    }
+    Ok(first_bytes[0] == 0x1f && first_bytes[1] == 0x8b)
 }
 
 #[cfg(test)]
