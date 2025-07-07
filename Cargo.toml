@@ -1,5 +1,5 @@
 [package]
-name = "vcf_parser_rs"
+name = "vcfparser"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,4 +11,4 @@ thiserror = "2.0.12"
 
 [lib]
 name = "vcfparser"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
