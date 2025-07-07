@@ -434,7 +434,7 @@ fn are_gzipped_magic_bytes(first_bytes: &[u8]) -> Result<bool, MagicByteError> {
     Ok(first_bytes[0] == 0x1f && first_bytes[1] == 0x8b)
 }
 
-#[pyclass]
+#[pyclass(name = "VcfRecord")]
 #[derive(Debug, Clone)]
 pub struct PyVcfRecord {
     #[pyo3(get)]
@@ -461,7 +461,7 @@ impl From<VcfRecord> for PyVcfRecord {
     }
 }
 
-#[pyclass(unsendable)]
+#[pyclass(name = "VcfRecordIterator", unsendable)]
 pub struct PyVcfRecordIterator {
     inner: Box<dyn Iterator<Item = VcfResult<VcfRecord>>>,
     _pool: Option<ThreadPool>,
