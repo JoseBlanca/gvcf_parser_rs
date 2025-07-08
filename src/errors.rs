@@ -59,4 +59,16 @@ pub enum VcfParseError {
 
     #[error("VCF file should be gzipped")]
     VCFFileShouldBeGzipped,
+
+    #[error("gVCF line has not enough fields to be a variant")]
+    GVCFLineNotEnoughFields,
+
+    #[error("VCF file ended before reading the whole header")]
+    BrokenHeader,
+
+    #[error("Malformed header fields and sample definition line")]
+    MalformedHeader,
+
+    #[error("Invariant gVCF line")]
+    InvariantgVCFLine,
 }
