@@ -1,7 +1,9 @@
-use std::io::{BufRead, BufReader, Read};
-
 use crate::errors::VcfParseError;
+use crate::utils_magic::file_is_gzipped;
 use flate2::read::MultiGzDecoder;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
+use std::path::Path;
 
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
 
@@ -74,28 +76,31 @@ impl<B: BufRead> GVcfRecordIterator<B> {
         }
     }
 }
-
-impl GVcfRecordIterator<BufReader<std::fs::File>> {
-    pub fn from_path(path: &str) -> std::io::Result<Self> {
-        let file = std::fs::File::open(path)?;
-        Ok(GVcfRecordIterator::new(BufReader::new(file)))
-    }
-}
-
 impl<R: Read> GVcfRecordIterator<BufReader<R>> {
     pub fn from_reader(reader: R) -> Self {
         let buf_reader = BufReader::new(reader);
         GVcfRecordIterator::new(buf_reader)
     }
 }
-
 impl<R: Read> GVcfRecordIterator<BufReader<MultiGzDecoder<R>>> {
-    pub fn from_gzip(reader: R) -> Self {
+    pub fn from_gzip_reader(reader: R) -> Self {
         let gz_decoder = MultiGzDecoder::new(reader);
         let buf_reader = BufReader::new(gz_decoder);
         GVcfRecordIterator::new(buf_reader)
     }
 }
+impl GVcfRecordIterator<BufReader<MultiGzDecoder<File>>> {
+    pub fn from_gzip_path<P: AsRef<Path>>(path: P) -> VcfResult<Self> {
+        if !file_is_gzipped(&path).map_err(|_| VcfParseError::MagicByteError)? {
+            return Err(VcfParseError::VCFFileShouldBeGzipped);
+        }
+        let file = File::open(&path)?;
+        let gz_decoder = MultiGzDecoder::new(file);
+        let buf_reader = BufReader::new(gz_decoder);
+        Ok(GVcfRecordIterator::new(buf_reader))
+    }
+}
+
 impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
     type Item = VcfResult<GVcfRecord>;
 

@@ -39,7 +39,31 @@ fn test_gvcf_parsing() {
 #[test]
 fn test_gzip_reader() {
     let file = File::open("tests/data/sample.g.vcf.gz").expect("Problem opening test file");
-    let records = GVcfRecordIterator::from_gzip(file);
+    let records = GVcfRecordIterator::from_gzip_reader(file);
+
+    let mut n_variants: u32 = 0;
+    let mut n_invariants: u32 = 0;
+    for record in records {
+        match record {
+            Ok(_variant) => {
+                n_variants += 1;
+            }
+            Err(VcfParseError::InvariantgVCFLine) => {
+                n_invariants += 1;
+            }
+            Err(error) => {
+                //Fail test
+                panic!("Unexpected error: {}", error);
+            }
+        }
+    }
+    assert_eq!(n_variants, 0);
+    assert_eq!(n_invariants, 63);
+}
+#[test]
+fn test_gzip_path() {
+    let path = "tests/data/sample.g.vcf.gz";
+    let records = GVcfRecordIterator::from_gzip_path(path).expect("Problem opening test file");
 
     let mut n_variants: u32 = 0;
     let mut n_invariants: u32 = 0;
