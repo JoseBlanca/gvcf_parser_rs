@@ -77,6 +77,31 @@ impl<B: BufRead> GVcfRecordIterator<B> {
             section: VcfSection::Header,
         }
     }
+    fn process_header_and_first_variant(&mut self) -> Option<VcfResult<GVcfRecord>> {
+        loop {
+            if self.line.starts_with("##") {
+                self.line.clear();
+                match self.reader.read_line(&mut self.line) {
+                    Ok(0) => return Some(Err(VcfParseError::BrokenHeader)),
+                    Ok(_) => {
+                        if !self.line.starts_with("##") {
+                            break;
+                        }
+                    }
+                    Err(error) => return Some(Err(VcfParseError::from(error))),
+                }
+            }
+        }
+        self.line.clear();
+        match self.reader.read_line(&mut self.line) {
+            Ok(0) => None, // EOF
+            Ok(_) => {
+                self.section = VcfSection::Body;
+                Some(GVcfRecord::from_line(&self.line))
+            }
+            Err(error) => return Some(Err(VcfParseError::from(error))),
+        }
+    }
 }
 impl<R: Read> GVcfRecordIterator<BufReader<R>> {
     pub fn from_reader(reader: R) -> Self {
@@ -135,29 +160,7 @@ impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
             Ok(0) => return None, // EOF
             Ok(_) => {
                 if self.section == VcfSection::Header {
-                    loop {
-                        if self.line.starts_with("##") {
-                            self.line.clear();
-                            match self.reader.read_line(&mut self.line) {
-                                Ok(0) => return Some(Err(VcfParseError::BrokenHeader)),
-                                Ok(_) => {
-                                    if !self.line.starts_with("##") {
-                                        break;
-                                    }
-                                }
-                                Err(error) => return Some(Err(VcfParseError::from(error))),
-                            }
-                        }
-                    }
-                    self.line.clear();
-                    match self.reader.read_line(&mut self.line) {
-                        Ok(0) => None, // EOF
-                        Ok(_) => {
-                            self.section = VcfSection::Body;
-                            Some(GVcfRecord::from_line(&self.line))
-                        }
-                        Err(error) => return Some(Err(VcfParseError::from(error))),
-                    }
+                    self.process_header_and_first_variant()
                 } else {
                     Some(GVcfRecord::from_line(&self.line))
                 }

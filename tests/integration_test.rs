@@ -50,11 +50,8 @@ fn test_parse_vcf_iter() {
 
 #[test]
 //#[ignore]
-fn test_parse_vcf_gz_file_iter() -> Result<(), Box<dyn std::error::Error>> {
-    let result = VcfRecordIterator::from_gzipped_vcf_path(
-        "/home/jose/analyses/g2psol/source_data/TS.vcf.gz",
-        4,
-    )?;
+fn test_performance() -> Result<(), Box<dyn std::error::Error>> {
+    let result = VcfRecordIterator::from_gzipped_vcf_path("sample_files/TS.vcf.gz", 4)?;
     let (parser, _pool) = result;
 
     let mut count = 0;
