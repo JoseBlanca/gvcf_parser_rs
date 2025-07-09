@@ -149,9 +149,6 @@ impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
                             }
                         }
                     }
-                    if !self.line.starts_with("#CHROM") {
-                        return Some(Err(VcfParseError::MalformedHeader));
-                    }
                     self.line.clear();
                     match self.reader.read_line(&mut self.line) {
                         Ok(0) => None, // EOF
