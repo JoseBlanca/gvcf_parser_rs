@@ -158,13 +158,10 @@ impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
 
         match self.reader.read_line(&mut self.line) {
             Ok(0) => return None, // EOF
-            Ok(_) => {
-                if self.section == VcfSection::Header {
-                    self.process_header_and_first_variant()
-                } else {
-                    Some(GVcfRecord::from_line(&self.line))
-                }
-            }
+            Ok(_) => match self.section {
+                VcfSection::Body => Some(GVcfRecord::from_line(&self.line)),
+                VcfSection::Header => self.process_header_and_first_variant(),
+            },
             Err(error) => Some(Err(VcfParseError::from(error))),
         }
     }

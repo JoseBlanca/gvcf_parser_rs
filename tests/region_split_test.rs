@@ -118,8 +118,8 @@ fn test_performance() {
 
     let path = "sample_files/sample.g.vcf.bgz";
     let (records, _pool) =
-        GVcfRecordIterator::from_bgzip_path(path, 4).expect("Problem opening test file");
-    println!("g.vcf.bgz");
+        GVcfRecordIterator::from_bgzip_path(path, 2).expect("Problem opening test file");
+    println!("{}", path);
 
     let mut n_variants: u32 = 0;
     let mut n_invariants: u32 = 0;
