@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader, Read};
 
 use crate::errors::VcfParseError;
+use flate2::read::MultiGzDecoder;
 
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
 
@@ -72,6 +73,13 @@ impl<B: BufRead> GVcfRecordIterator<B> {
     }
 }
 
+impl GVcfRecordIterator<BufReader<std::fs::File>> {
+    pub fn from_path(path: &str) -> std::io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        Ok(GVcfRecordIterator::new(BufReader::new(file)))
+    }
+}
+
 impl<R: Read> GVcfRecordIterator<BufReader<R>> {
     pub fn from_reader(reader: R) -> Self {
         let buf_reader = BufReader::new(reader);
@@ -79,6 +87,13 @@ impl<R: Read> GVcfRecordIterator<BufReader<R>> {
     }
 }
 
+impl<R: Read> GVcfRecordIterator<BufReader<MultiGzDecoder<R>>> {
+    pub fn from_gzip(reader: R) -> Self {
+        let gz_decoder = MultiGzDecoder::new(reader);
+        let buf_reader = BufReader::new(gz_decoder);
+        GVcfRecordIterator::new(buf_reader)
+    }
+}
 impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
     type Item = VcfResult<GVcfRecord>;
 

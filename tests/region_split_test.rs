@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::BufReader;
 use vcfparser::{errors::VcfParseError, region_splitter::GVcfRecordIterator};
 
@@ -33,4 +34,29 @@ fn test_gvcf_parsing() {
     }
     assert_eq!(n_variants, 4);
     assert_eq!(n_invariants, 2);
+}
+
+#[test]
+fn test_gzip_reader() {
+    let file = File::open("tests/data/sample.g.vcf.gz").expect("Problem opening test file");
+    let records = GVcfRecordIterator::from_gzip(file);
+
+    let mut n_variants: u32 = 0;
+    let mut n_invariants: u32 = 0;
+    for record in records {
+        match record {
+            Ok(_variant) => {
+                n_variants += 1;
+            }
+            Err(VcfParseError::InvariantgVCFLine) => {
+                n_invariants += 1;
+            }
+            Err(error) => {
+                //Fail test
+                panic!("Unexpected error: {}", error);
+            }
+        }
+    }
+    assert_eq!(n_variants, 0);
+    assert_eq!(n_invariants, 63);
 }
