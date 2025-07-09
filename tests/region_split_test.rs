@@ -109,3 +109,35 @@ fn test_bgzip_path() {
     assert_eq!(n_variants, 0);
     assert_eq!(n_invariants, 63);
 }
+
+#[test]
+fn test_performance() {
+    let path = "sample_files/sample.g.vcf.gz";
+    //let records = GVcfRecordIterator::from_gzip_path(path).expect("Problem opening test file");
+    //println!("g.vcf.gzip");
+
+    let path = "sample_files/sample.g.vcf.bgz";
+    let (records, _pool) =
+        GVcfRecordIterator::from_bgzip_path(path, 4).expect("Problem opening test file");
+    println!("g.vcf.bgz");
+
+    let mut n_variants: u32 = 0;
+    let mut n_invariants: u32 = 0;
+    for record in records {
+        match record {
+            Ok(_variant) => {
+                n_variants += 1;
+            }
+            Err(VcfParseError::InvariantgVCFLine) => {
+                n_invariants += 1;
+            }
+            Err(error) => {
+                //Fail test
+                panic!("Unexpected error: {}", error);
+            }
+        }
+    }
+    println!("Num. variant loci: {n_variants}");
+    println!("Num. invariant loci: {n_invariants}");
+    println!("Num.loci: {}", n_invariants + n_variants);
+}
