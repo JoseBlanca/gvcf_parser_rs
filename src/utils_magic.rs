@@ -35,8 +35,7 @@ pub fn are_bgzipped_magic_bytes(first_bytes: &[u8]) -> Result<bool, MagicByteErr
     Ok(first_bytes[0] == 0x1F
         && first_bytes[1] == 0x8B
         && first_bytes[2] == 0x08
-        && first_bytes[12] == 0x42
-        && first_bytes[13] == 0x43)
+        && first_bytes[3] == 0x04)
 }
 
 fn read_first_bytes<P: AsRef<Path>>(path: &P, num_bytes: usize) -> Result<Vec<u8>, MagicByteError> {
