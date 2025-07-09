@@ -5,6 +5,8 @@ use flate2::read::MultiGzDecoder;
 
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
 
+const NON_REF: &str = "<NON_REF>";
+
 pub struct GVcfRecord {
     pub chrom: String,
     pub pos: u32,
@@ -29,7 +31,7 @@ impl GVcfRecord {
             .next()
             .ok_or_else(|| VcfParseError::GVCFLineNotEnoughFields)?;
 
-        if alt_alleles == "<NO_REF>" {
+        if alt_alleles == NON_REF {
             return Err(VcfParseError::InvariantgVCFLine);
         }
 
@@ -39,7 +41,7 @@ impl GVcfRecord {
 
         let alleles: Vec<String> = std::iter::once(ref_allele)
             .chain(alt_alleles.split(','))
-            .filter(|allele| allele != &"<NO_REF>")
+            .filter(|allele| allele != &NON_REF)
             .map(str::to_string)
             .collect();
 
