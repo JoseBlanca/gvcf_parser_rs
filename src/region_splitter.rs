@@ -1,6 +1,8 @@
 use crate::errors::VcfParseError;
-use crate::utils_magic::file_is_gzipped;
+use crate::utils_magic::{file_is_bgzipped, file_is_gzipped};
 use flate2::read::MultiGzDecoder;
+use rust_htslib::bgzf::Reader as BgzfReader;
+use rust_htslib::tpool::ThreadPool;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -98,6 +100,28 @@ impl GVcfRecordIterator<BufReader<MultiGzDecoder<File>>> {
         let gz_decoder = MultiGzDecoder::new(file);
         let buf_reader = BufReader::new(gz_decoder);
         Ok(GVcfRecordIterator::new(buf_reader))
+    }
+}
+
+impl GVcfRecordIterator<BufReader<rust_htslib::bgzf::Reader>> {
+    pub fn from_bgzip_path<P: AsRef<Path>>(
+        path: P,
+        n_threads: u32,
+    ) -> VcfResult<(Self, ThreadPool)> {
+        if !file_is_bgzipped(&path).map_err(|_| VcfParseError::MagicByteError)? {
+            return Err(VcfParseError::VCFFileShouldBeBGzipped);
+        }
+
+        let mut bgz_reader =
+            BgzfReader::from_path(&path).map_err(|_e| VcfParseError::PathError {
+                path: path.as_ref().to_string_lossy().into_owned(),
+            })?;
+        let pool = ThreadPool::new(n_threads).map_err(|_e| VcfParseError::ThreadPoolError)?;
+        bgz_reader
+            .set_thread_pool(&pool)
+            .map_err(|_e| VcfParseError::ThreadPoolError)?;
+        let buf_bgz_reader = BufReader::new(bgz_reader);
+        Ok((GVcfRecordIterator::new(buf_bgz_reader), pool))
     }
 }
 

@@ -60,6 +60,9 @@ pub enum VcfParseError {
     #[error("VCF file should be gzipped")]
     VCFFileShouldBeGzipped,
 
+    #[error("VCF file should be bgzipped")]
+    VCFFileShouldBeBGzipped,
+
     #[error("gVCF line has not enough fields to be a variant")]
     GVCFLineNotEnoughFields,
 
