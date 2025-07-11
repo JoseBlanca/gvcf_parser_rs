@@ -14,7 +14,7 @@ const NON_REF: &str = "<NON_REF>";
 pub struct GVcfRecord {
     pub chrom: String,
     pub pos: u32,
-    alleles: Vec<String>,
+    pub alleles: Vec<String>,
 }
 
 impl GVcfRecord {
@@ -54,6 +54,18 @@ impl GVcfRecord {
             pos: pos,
             alleles: alleles,
         })
+    }
+    pub fn get_span(self: &GVcfRecord) -> VcfResult<(u32, u32)> {
+        let max_allele_len = self.alleles.iter().map(|allele| allele.len()).max().ok_or(
+            VcfParseError::RuntimeError {
+                message: "There should be at least one allele".to_string(),
+            },
+        )?;
+        if max_allele_len == 1 {
+            Ok((self.pos, self.pos))
+        } else {
+            Ok((self.pos, self.pos + max_allele_len as u32 - 1))
+        }
     }
 }
 

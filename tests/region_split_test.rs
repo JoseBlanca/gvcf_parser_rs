@@ -1,6 +1,9 @@
 use std::fs::File;
 use std::io::BufReader;
-use vcfparser::{errors::VcfParseError, region_splitter::GVcfRecordIterator};
+use vcfparser::{
+    errors::VcfParseError,
+    region_splitter::{GVcfRecord, GVcfRecordIterator},
+};
 
 const SAMPLE_GVCF: &str = "##
 ##FORMAT=<ID=HQ,Number=2,Type=Integer,Description=\"Haplotype Quality\">
@@ -140,4 +143,32 @@ fn test_performance() {
     println!("Num. variant loci: {n_variants}");
     println!("Num. invariant loci: {n_invariants}");
     println!("Num.loci: {}", n_invariants + n_variants);
+}
+
+#[test]
+fn test_g_vcf_record() {
+    let pos: u32 = 10;
+    let alleles = vec!["A".to_string(), "C".to_string()];
+    let snp = GVcfRecord {
+        chrom: "chr1".to_string(),
+        pos: pos,
+        alleles: alleles,
+    };
+    assert!(matches!(snp.get_span(), Ok((10, 10))));
+
+    let alleles = vec!["AT".to_string(), "A".to_string()];
+    let snp = GVcfRecord {
+        chrom: "chr1".to_string(),
+        pos: pos,
+        alleles: alleles,
+    };
+    assert!(matches!(snp.get_span(), Ok((10, 11))));
+
+    let alleles = vec!["A".to_string(), "ATT".to_string()];
+    let snp = GVcfRecord {
+        chrom: "chr1".to_string(),
+        pos: pos,
+        alleles: alleles,
+    };
+    assert!(matches!(snp.get_span(), Ok((10, 12))));
 }

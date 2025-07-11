@@ -74,4 +74,7 @@ pub enum VcfParseError {
 
     #[error("Invariant gVCF line")]
     InvariantgVCFLine,
+
+    #[error("RuntimeError: {message}")]
+    RuntimeError { message: String },
 }
