@@ -40,6 +40,21 @@ fn test_gvcf_parsing() {
 }
 
 #[test]
+fn test_buffer() {
+    let reader = BufReader::new(SAMPLE_GVCF.as_bytes());
+    let mut var_iterator = GVcfRecordIterator::from_reader(reader);
+    assert!(matches!(var_iterator.fill_buffer(3), Ok(3)));
+    assert!(matches!(var_iterator.fill_buffer(1), Ok(0)));
+    assert!(matches!(var_iterator.fill_buffer(4), Ok(1)));
+    assert!(matches!(var_iterator.fill_buffer(5), Ok(0)));
+    let buffered_items = var_iterator.peek_items_in_buffer();
+    let poss = [17330, 17331, 17333, 17334];
+    for (expected_pos, variant) in poss.iter().zip(buffered_items) {
+        assert_eq!(&variant.pos, expected_pos);
+    }
+}
+
+#[test]
 fn test_gzip_reader() {
     let file = File::open("tests/data/sample.g.vcf.gz").expect("Problem opening test file");
     let records = GVcfRecordIterator::from_gzip_reader(file);

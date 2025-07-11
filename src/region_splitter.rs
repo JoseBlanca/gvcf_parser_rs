@@ -3,6 +3,7 @@ use crate::utils_magic::{file_is_bgzipped, file_is_gzipped};
 use flate2::read::MultiGzDecoder;
 use rust_htslib::bgzf::Reader as BgzfReader;
 use rust_htslib::tpool::ThreadPool;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -11,6 +12,7 @@ pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
 
 const NON_REF: &str = "<NON_REF>";
 
+#[derive(Debug)]
 pub struct GVcfRecord {
     pub chrom: String,
     pub pos: u32,
@@ -79,6 +81,7 @@ pub struct GVcfRecordIterator<B: BufRead> {
     reader: B,
     line: String,
     section: VcfSection,
+    buffer: VecDeque<GVcfRecord>,
 }
 
 impl<B: BufRead> GVcfRecordIterator<B> {
@@ -87,6 +90,7 @@ impl<B: BufRead> GVcfRecordIterator<B> {
             reader: reader,
             line: String::new(),
             section: VcfSection::Header,
+            buffer: VecDeque::new(),
         }
     }
     fn process_header_and_first_variant(&mut self) -> Option<VcfResult<GVcfRecord>> {
@@ -114,7 +118,43 @@ impl<B: BufRead> GVcfRecordIterator<B> {
             Err(error) => return Some(Err(VcfParseError::from(error))),
         }
     }
+    pub fn fill_buffer(&mut self, n_items: usize) -> VcfResult<usize> {
+        let mut n_items_added: usize = 0;
+        while self.buffer.len() < n_items {
+            self.line.clear();
+            match self.reader.read_line(&mut self.line) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    if self.section == VcfSection::Header {
+                        let result = self.process_header_and_first_variant();
+                        if let Some(Ok(record)) = result {
+                            self.buffer.push_back(record);
+                            n_items_added += 1;
+                        }
+                    } else {
+                        match GVcfRecord::from_line(&self.line) {
+                            Ok(record) => {
+                                self.buffer.push_back(record);
+                                n_items_added += 1;
+                            }
+                            Err(VcfParseError::InvariantgVCFLine) => continue, // skip
+                            Err(err) => return Err(err),
+                        }
+                    }
+                }
+                Err(err) => {
+                    return Err(VcfParseError::from(err));
+                }
+            }
+        }
+        Ok(n_items_added)
+    }
+
+    pub fn peek_items_in_buffer(&self) -> impl Iterator<Item = &GVcfRecord> {
+        self.buffer.iter()
+    }
 }
+
 impl<R: Read> GVcfRecordIterator<BufReader<R>> {
     pub fn from_reader(reader: R) -> Self {
         let buf_reader = BufReader::new(reader);
@@ -178,3 +218,5 @@ impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
         }
     }
 }
+
+// fn get_span_covers_at_least(chrom, end) -> n_records, goes_beyond:bool, new_end
