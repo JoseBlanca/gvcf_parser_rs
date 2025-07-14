@@ -20,14 +20,10 @@ fn test_gvcf_parsing() {
     let reader = BufReader::new(SAMPLE_GVCF.as_bytes());
     let parser = GVcfRecordIterator::from_reader(reader);
     let mut n_variants: u32 = 0;
-    let mut n_invariants: u32 = 0;
     for record in parser {
         match record {
             Ok(_variant) => {
                 n_variants += 1;
-            }
-            Err(VcfParseError::InvariantgVCFLine) => {
-                n_invariants += 1;
             }
             Err(error) => {
                 //Fail test
@@ -36,7 +32,6 @@ fn test_gvcf_parsing() {
         }
     }
     assert_eq!(n_variants, 4);
-    assert_eq!(n_invariants, 2);
 }
 
 #[test]
@@ -47,8 +42,34 @@ fn test_buffer() {
     assert!(matches!(var_iterator.fill_buffer(1), Ok(0)));
     assert!(matches!(var_iterator.fill_buffer(4), Ok(1)));
     assert!(matches!(var_iterator.fill_buffer(5), Ok(0)));
+    let variant = var_iterator.next().unwrap().unwrap();
+    assert_eq!(variant.pos, 17330);
     let buffered_items = var_iterator.peek_items_in_buffer();
-    let poss = [17330, 17331, 17333, 17334];
+    let poss = [17331, 17333, 17334];
+    for (expected_pos, variant) in poss.iter().zip(buffered_items) {
+        assert_eq!(&variant.pos, expected_pos);
+    }
+}
+#[test]
+fn test_buffer2() {
+    let reader = BufReader::new(SAMPLE_GVCF.as_bytes());
+    let mut var_iterator = GVcfRecordIterator::from_reader(reader);
+    assert!(matches!(var_iterator.fill_buffer(2), Ok(2)));
+    let variant = var_iterator.next().unwrap().unwrap();
+    assert_eq!(variant.pos, 17330);
+    let variant = var_iterator.next().unwrap().unwrap();
+    assert_eq!(variant.pos, 17331);
+
+    let buffered_items: Vec<&GVcfRecord> = var_iterator.peek_items_in_buffer().collect();
+    assert_eq!(buffered_items.len(), 0);
+
+    let variant = var_iterator.next().unwrap().unwrap();
+    assert_eq!(variant.pos, 17333);
+
+    assert!(matches!(var_iterator.fill_buffer(2), Ok(1)));
+
+    let buffered_items = var_iterator.peek_items_in_buffer();
+    let poss = [17334];
     for (expected_pos, variant) in poss.iter().zip(buffered_items) {
         assert_eq!(&variant.pos, expected_pos);
     }
@@ -60,14 +81,10 @@ fn test_gzip_reader() {
     let records = GVcfRecordIterator::from_gzip_reader(file);
 
     let mut n_variants: u32 = 0;
-    let mut n_invariants: u32 = 0;
     for record in records {
         match record {
             Ok(_variant) => {
                 n_variants += 1;
-            }
-            Err(VcfParseError::InvariantgVCFLine) => {
-                n_invariants += 1;
             }
             Err(error) => {
                 //Fail test
@@ -76,7 +93,6 @@ fn test_gzip_reader() {
         }
     }
     assert_eq!(n_variants, 0);
-    assert_eq!(n_invariants, 63);
 }
 #[test]
 fn test_gzip_path() {
@@ -84,14 +100,10 @@ fn test_gzip_path() {
     let records = GVcfRecordIterator::from_gzip_path(path).expect("Problem opening test file");
 
     let mut n_variants: u32 = 0;
-    let mut n_invariants: u32 = 0;
     for record in records {
         match record {
             Ok(_variant) => {
                 n_variants += 1;
-            }
-            Err(VcfParseError::InvariantgVCFLine) => {
-                n_invariants += 1;
             }
             Err(error) => {
                 //Fail test
@@ -100,7 +112,6 @@ fn test_gzip_path() {
         }
     }
     assert_eq!(n_variants, 0);
-    assert_eq!(n_invariants, 63);
 }
 #[test]
 fn test_bgzip_path() {
@@ -109,14 +120,10 @@ fn test_bgzip_path() {
         GVcfRecordIterator::from_bgzip_path(path, 4).expect("Problem opening test file");
 
     let mut n_variants: u32 = 0;
-    let mut n_invariants: u32 = 0;
     for record in records {
         match record {
             Ok(_variant) => {
                 n_variants += 1;
-            }
-            Err(VcfParseError::InvariantgVCFLine) => {
-                n_invariants += 1;
             }
             Err(error) => {
                 //Fail test
@@ -125,7 +132,6 @@ fn test_bgzip_path() {
         }
     }
     assert_eq!(n_variants, 0);
-    assert_eq!(n_invariants, 63);
 }
 
 #[test]
