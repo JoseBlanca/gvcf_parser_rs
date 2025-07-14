@@ -11,6 +11,7 @@ use std::path::Path;
 pub type VcfResult<T> = std::result::Result<T, VcfParseError>;
 
 const NON_REF: &str = "<NON_REF>";
+const DEF_N_VARIANTS_IN_BUFFER: usize = 100;
 
 #[derive(Debug)]
 pub struct GVcfRecord {
@@ -206,15 +207,22 @@ impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
     type Item = VcfResult<GVcfRecord>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.line.clear();
+        if self.buffer.len() == 0 {
+            match self.fill_buffer(DEF_N_VARIANTS_IN_BUFFER) {
+                Err(error) => return Some(Err(error)),
+                Ok(n_items_added) => match n_items_added {
+                    0 => return None,
+                    _ => (),
+                },
+            }
+        }
 
-        match self.reader.read_line(&mut self.line) {
-            Ok(0) => return None, // EOF
-            Ok(_) => match self.section {
-                VcfSection::Body => Some(GVcfRecord::from_line(&self.line)),
-                VcfSection::Header => self.process_header_and_first_variant(),
-            },
-            Err(error) => Some(Err(VcfParseError::from(error))),
+        if let Some(variant) = self.buffer.pop_front() {
+            return Some(Ok(variant));
+        } else {
+            return Some(Err(VcfParseError::RuntimeError {
+                message: "The buffer should contain something".to_string(),
+            }));
         }
     }
 }
