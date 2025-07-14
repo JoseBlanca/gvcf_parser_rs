@@ -66,7 +66,7 @@ fn test_buffer2() {
     let variant = var_iterator.next().unwrap().unwrap();
     assert_eq!(variant.pos, 17333);
 
-    assert!(matches!(var_iterator.fill_buffer(2), Ok(1)));
+    assert!(matches!(var_iterator.fill_buffer(2), Ok(0)));
 
     let buffered_items = var_iterator.peek_items_in_buffer();
     let poss = [17334];
