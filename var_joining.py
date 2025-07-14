@@ -37,21 +37,12 @@ def setup_vcfs():
     return temp_vcf1, temp_vcf2, temp_dir
 
 
-def calc_var_len(var):
-    return max(len(allele) for allele in var.alleles)
-
-
-def calc_var_span(var):
-    var_len = calc_var_len(var)
-    return var.pos, var.pos + var_len - 1
-
-
 def main():
     temp_vcf1, temp_vcf2, temp_dir = setup_vcfs()
-    vars1 = vcfparser.PyVcfRecordIterator(temp_vcf1.name + ".gz", 1)
-    vars2 = vcfparser.PyVcfRecordIterator(temp_vcf2.name + ".gz", 1)
-    for var in vars1:
-        print(calc_var_span(var))
+    vars1 = vcfparser.GVcfGzipIterator.from_path(temp_vcf1.name + ".gz")
+    vars2 = vcfparser.GVcfGzipIterator.from_path("sample_files/sample.g.vcf.gz")
+    for var in vars2:
+        print(var.get_span())
 
 
 main()
