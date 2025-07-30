@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cyvcf2>=0.31.1",
     "genomicranges>=0.7.1",
     "iranges>=0.5.2",
     "maturin>=1.9.0",
