@@ -2,3 +2,5 @@
 sample_files/sample.g.vcf.gz
 sample_files/sample.g.vcf.bgz
 sample_files/TS.vcf.gz
+pysrc/vcfparser/vcfparser.cpython-313-x86_64-linux-gnu.so
+*pyc

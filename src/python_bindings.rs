@@ -128,6 +128,7 @@ impl GVcfGzipIterator {
 }
 
 #[pymodule]
+#[pyo3(name = "vcfparser")]
 fn vcfparser(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGVcfRecord>()?;
     m.add_class::<GVcfGzipIterator>()?;
