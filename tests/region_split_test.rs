@@ -113,26 +113,6 @@ fn test_gzip_path() {
     }
     assert_eq!(n_variants, 0);
 }
-#[test]
-fn test_bgzip_path() {
-    let path = "tests/data/sample.g.vcf.bgz";
-    let (records, _pool) =
-        GVcfRecordIterator::from_bgzip_path(path, 4).expect("Problem opening test file");
-
-    let mut n_variants: u32 = 0;
-    for record in records {
-        match record {
-            Ok(_variant) => {
-                n_variants += 1;
-            }
-            Err(error) => {
-                //Fail test
-                panic!("Unexpected error: {}", error);
-            }
-        }
-    }
-    assert_eq!(n_variants, 0);
-}
 
 #[test]
 fn test_performance() {
@@ -141,8 +121,7 @@ fn test_performance() {
     //println!("g.vcf.gzip");
 
     let path = "sample_files/sample.g.vcf.bgz";
-    let (records, _pool) =
-        GVcfRecordIterator::from_bgzip_path(path, 2).expect("Problem opening test file");
+    let records = GVcfRecordIterator::from_gzip_path(path).expect("Problem opening test file");
     println!("{}", path);
 
     let mut n_variants: u32 = 0;
