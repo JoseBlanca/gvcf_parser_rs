@@ -1,85 +1,45 @@
-use pyo3::exceptions::PyValueError;
+use crate::gvcf_parser::GVcfRecordIterator;
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::PyModule;
+use std::collections::HashMap;
 
-use arrow2::array::{Array, UInt32Array, Utf8Array};
-use arrow2::chunk::Chunk;
-use arrow2::datatypes::{DataType, Field, Schema};
-use arrow2::io::ipc::write::FileWriter;
-use arrow2::io::ipc::write::WriteOptions;
-use std::io::Cursor;
+#[pyfunction]
+pub fn collect_vars_positions(path: &str) -> PyResult<(Vec<u32>, Vec<u32>, Vec<u32>, Vec<String>)> {
+    let mut chrom_map = HashMap::new();
+    let mut id_to_chrom = Vec::new();
+    let mut next_id = 0u32;
 
-use crate::errors::VcfParseError;
-use crate::gvcf_parser::{GVcfRecord, GVcfRecordIterator, VcfResult};
-
-pub fn collect_variant_coords_as_arrow<I>(iter: I) -> VcfResult<(Schema, Chunk<Box<dyn Array>>)>
-where
-    I: Iterator<Item = VcfResult<GVcfRecord>>,
-{
-    let mut chroms = Vec::new();
+    let mut chrom_ids = Vec::new();
     let mut positions = Vec::new();
     let mut widths = Vec::new();
 
-    for result in iter {
-        match result {
-            Ok(rec) => {
-                let (start, end) = rec.get_span()?;
-                chroms.push(rec.chrom);
-                positions.push(start);
-                widths.push(end - start + 1);
+    let iter = GVcfRecordIterator::from_gzip_path(path)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+
+    for r in iter {
+        let rec = r.map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let (start, end) = rec
+            .get_span()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let chrom_id = match chrom_map.get(&rec.chrom) {
+            Some(&id) => id,
+            None => {
+                chrom_map.insert(rec.chrom.clone(), next_id);
+                id_to_chrom.push(rec.chrom.clone());
+                next_id += 1;
+                next_id - 1
             }
-            Err(VcfParseError::InvariantgVCFLine) => continue,
-            Err(e) => return Err(e),
-        }
+        };
+        chrom_ids.push(chrom_id);
+        positions.push(start);
+        widths.push(end - start + 1);
     }
 
-    let arrays: Vec<Box<dyn Array>> = vec![
-        Box::new(Utf8Array::<i32>::from_slice(chroms)),
-        Box::new(UInt32Array::from_slice(positions)),
-        Box::new(UInt32Array::from_slice(widths)),
-    ];
-
-    let schema = Schema::from(vec![
-        Field::new("chroms", DataType::Utf8, false),
-        Field::new("positions", DataType::UInt32, false),
-        Field::new("var_widths", DataType::UInt32, false),
-    ]);
-
-    Ok((schema, Chunk::new(arrays)))
-}
-
-#[pyfunction]
-pub fn export_arrow_ipc(path: &str) -> PyResult<Py<PyBytes>> {
-    let iter = GVcfRecordIterator::from_gzip_path(path)
-        .map_err(|e| PyValueError::new_err(format!("Failed to open GVCF: {e}")))?;
-
-    let (schema, chunk) = collect_variant_coords_as_arrow(iter)
-        .map_err(|e| PyValueError::new_err(format!("Error collecting records: {e}")))?;
-
-    let buffer = Cursor::new(Vec::new());
-    let options = WriteOptions { compression: None };
-
-    let mut writer = FileWriter::try_new(buffer, schema, None, options)
-        .map_err(|e| PyValueError::new_err(format!("FileWriter init failed: {e}")))?;
-
-    writer
-        .write(&chunk, None)
-        .map_err(|e| PyValueError::new_err(format!("IPC write failed: {e}")))?;
-
-    writer
-        .finish()
-        .map_err(|e| PyValueError::new_err(format!("IPC finish failed: {e}")))?;
-
-    let buffer = writer.into_inner();
-    let bytes = buffer.into_inner();
-
-    let pybytes = Python::with_gil(|py| PyBytes::new(py, &bytes).into());
-
-    Ok(pybytes)
+    Ok((chrom_ids, positions, widths, id_to_chrom))
 }
 
 #[pymodule]
 fn gvcfparser(_py: Python<'_>, m: Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(export_arrow_ipc, &m)?)?;
+    m.add_function(wrap_pyfunction!(collect_vars_positions, &m)?)?;
     Ok(())
 }
