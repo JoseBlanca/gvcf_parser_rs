@@ -79,7 +79,7 @@ pub fn export_arrow_ipc(path: &str) -> PyResult<Py<PyBytes>> {
 }
 
 #[pymodule]
-fn vcfparser(_py: Python<'_>, m: Bound<'_, PyModule>) -> PyResult<()> {
+fn gvcfparser(_py: Python<'_>, m: Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(export_arrow_ipc, &m)?)?;
     Ok(())
 }
