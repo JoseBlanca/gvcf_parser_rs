@@ -1,6 +1,7 @@
+use arrow2::array::UInt32Array;
 use gvcfparser::{
     errors::VcfParseError,
-    gvcf_parser::{collect_variant_coords_in_df, GVcfRecord, GVcfRecordIterator},
+    gvcf_parser::{collect_variant_coords_as_arrow, GVcfRecord, GVcfRecordIterator},
 };
 use std::fs::File;
 use std::io::BufReader;
@@ -174,7 +175,7 @@ fn test_g_vcf_record() {
 }
 
 #[test]
-fn test_extract_coords_df() {
+fn test_extract_coords_arrow_chunk() {
     let records = vec![
         Ok(GVcfRecord {
             chrom: "chr1".to_string(),
@@ -188,13 +189,27 @@ fn test_extract_coords_df() {
         }),
     ];
 
-    let df = collect_variant_coords_in_df(records.into_iter()).unwrap();
-    println!("{}", df);
-    assert_eq!(df.shape(), (2, 3));
-    let positions = df.column("positions").unwrap().u32().unwrap();
+    let batch = collect_variant_coords_as_arrow(records.into_iter()).unwrap();
+    let chunk = &batch.chunk;
+
+    assert_eq!(chunk.len(), 2);
+    assert_eq!(chunk.arrays().len(), 3);
+
+    // positions column
+    let positions = chunk.arrays()[1]
+        .as_any()
+        .downcast_ref::<UInt32Array>()
+        .unwrap();
+
     assert_eq!(positions.get(0), Some(100));
     assert_eq!(positions.get(1), Some(200));
-    let var_widths = df.column("var_widths").unwrap().u32().unwrap();
-    assert_eq!(var_widths.get(0), Some(1));
-    assert_eq!(var_widths.get(1), Some(3));
+
+    // var_widths column
+    let widths = chunk.arrays()[2]
+        .as_any()
+        .downcast_ref::<UInt32Array>()
+        .unwrap();
+
+    assert_eq!(widths.get(0), Some(1)); // A and G → len = 1
+    assert_eq!(widths.get(1), Some(3)); // TAA → len = 3
 }

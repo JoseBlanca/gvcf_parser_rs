@@ -1,75 +1,85 @@
-use crate::gvcf_parser::{GVcfRecord, GVcfRecordIterator};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
-use pyo3::types::PyType;
+use pyo3::types::PyBytes;
 
-#[pyclass]
-pub struct PyGVcfRecord {
-    inner: GVcfRecord,
-}
+use arrow2::array::{Array, UInt32Array, Utf8Array};
+use arrow2::chunk::Chunk;
+use arrow2::datatypes::{DataType, Field, Schema};
+use arrow2::io::ipc::write::FileWriter;
+use arrow2::io::ipc::write::WriteOptions;
+use std::io::Cursor;
 
-#[pymethods]
-impl PyGVcfRecord {
-    #[getter]
-    fn chrom(&self) -> &str {
-        &self.inner.chrom
-    }
+use crate::errors::VcfParseError;
+use crate::gvcf_parser::{GVcfRecord, GVcfRecordIterator, VcfResult};
 
-    #[getter]
-    fn pos(&self) -> u32 {
-        self.inner.pos
-    }
+pub fn collect_variant_coords_as_arrow<I>(iter: I) -> VcfResult<(Schema, Chunk<Box<dyn Array>>)>
+where
+    I: Iterator<Item = VcfResult<GVcfRecord>>,
+{
+    let mut chroms = Vec::new();
+    let mut positions = Vec::new();
+    let mut widths = Vec::new();
 
-    #[getter]
-    fn alleles(&self) -> Vec<String> {
-        self.inner.alleles.clone()
-    }
-
-    pub fn get_span(&self) -> PyResult<(u32, u32)> {
-        self.inner
-            .get_span()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("get_span error: {}", e)))
-    }
-
-    pub fn __repr__(&self) -> String {
-        format!("{:?}", self.inner)
-    }
-}
-
-#[pyclass]
-pub struct GVcfGzipIterator {
-    inner: GVcfRecordIterator<std::io::BufReader<flate2::read::MultiGzDecoder<std::fs::File>>>,
-}
-
-#[pymethods]
-impl GVcfGzipIterator {
-    #[classmethod]
-    pub fn from_path(_cls: &Bound<'_, PyType>, path: &str) -> PyResult<Self> {
-        GVcfRecordIterator::from_gzip_path(path)
-            .map(|inner| Self { inner })
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
-    }
-
-    fn __iter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
-        slf
-    }
-
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<PyGVcfRecord> {
-        while let Some(item) = slf.inner.next() {
-            match item {
-                Ok(record) => return Some(PyGVcfRecord { inner: record }),
-                Err(_) => continue,
+    for result in iter {
+        match result {
+            Ok(rec) => {
+                let (start, end) = rec.get_span()?;
+                chroms.push(rec.chrom);
+                positions.push(start);
+                widths.push(end - start + 1);
             }
+            Err(VcfParseError::InvariantgVCFLine) => continue,
+            Err(e) => return Err(e),
         }
-        None
     }
+
+    let arrays: Vec<Box<dyn Array>> = vec![
+        Box::new(Utf8Array::<i32>::from_slice(chroms)),
+        Box::new(UInt32Array::from_slice(positions)),
+        Box::new(UInt32Array::from_slice(widths)),
+    ];
+
+    let schema = Schema::from(vec![
+        Field::new("chroms", DataType::Utf8, false),
+        Field::new("positions", DataType::UInt32, false),
+        Field::new("var_widths", DataType::UInt32, false),
+    ]);
+
+    Ok((schema, Chunk::new(arrays)))
+}
+
+#[pyfunction]
+pub fn export_arrow_ipc(path: &str) -> PyResult<Py<PyBytes>> {
+    let iter = GVcfRecordIterator::from_gzip_path(path)
+        .map_err(|e| PyValueError::new_err(format!("Failed to open GVCF: {e}")))?;
+
+    let (schema, chunk) = collect_variant_coords_as_arrow(iter)
+        .map_err(|e| PyValueError::new_err(format!("Error collecting records: {e}")))?;
+
+    let buffer = Cursor::new(Vec::new());
+    let options = WriteOptions { compression: None };
+
+    let mut writer = FileWriter::try_new(buffer, schema, None, options)
+        .map_err(|e| PyValueError::new_err(format!("FileWriter init failed: {e}")))?;
+
+    writer
+        .write(&chunk, None)
+        .map_err(|e| PyValueError::new_err(format!("IPC write failed: {e}")))?;
+
+    writer
+        .finish()
+        .map_err(|e| PyValueError::new_err(format!("IPC finish failed: {e}")))?;
+
+    let buffer = writer.into_inner();
+    let bytes = buffer.into_inner();
+
+    let pybytes = Python::with_gil(|py| PyBytes::new(py, &bytes).into());
+
+    Ok(pybytes)
 }
 
 #[pymodule]
-#[pyo3(name = "vcfparser")]
-fn vcfparser(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<GVcfGzipIterator>()?;
-    //m.add_class::<PyVcfRecordIterator>()?;
-    //m.add_class::<PyVcfRecord>()?;
+fn vcfparser(_py: Python<'_>, m: Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(export_arrow_ipc, &m)?)?;
     Ok(())
 }

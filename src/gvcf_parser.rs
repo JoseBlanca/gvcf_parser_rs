@@ -1,7 +1,9 @@
 use crate::errors::VcfParseError;
 use crate::utils_magic::file_is_gzipped;
+use arrow2::array::{Array, UInt32Array, Utf8Array};
+use arrow2::chunk::Chunk;
+use arrow2::datatypes::{DataType, Field, Schema};
 use flate2::read::MultiGzDecoder;
-use polars::prelude::*;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
@@ -204,7 +206,12 @@ impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
     }
 }
 
-pub fn collect_variant_coords_in_df<I>(iter: I) -> VcfResult<DataFrame>
+pub struct ArrowBatch {
+    pub schema: Schema,
+    pub chunk: Chunk<Box<dyn Array>>,
+}
+
+pub fn collect_variant_coords_as_arrow<I>(iter: I) -> VcfResult<ArrowBatch>
 where
     I: Iterator<Item = VcfResult<GVcfRecord>>,
 {
@@ -225,14 +232,20 @@ where
         }
     }
 
-    let df = df![
-        "chroms" => chroms,
-        "positions" => positions,
-        "var_widths" => widths,
-    ]
-    .map_err(|e| VcfParseError::PolarsError {
-        message: e.to_string(),
-    })?;
+    let arrays: Vec<Box<dyn Array>> = vec![
+        Box::new(Utf8Array::<i32>::from_slice(chroms)),
+        Box::new(UInt32Array::from_slice(positions)),
+        Box::new(UInt32Array::from_slice(widths)),
+    ];
 
-    Ok(df)
+    let schema = Schema::from(vec![
+        Field::new("chroms", DataType::Utf8, false),
+        Field::new("positions", DataType::UInt32, false),
+        Field::new("var_widths", DataType::UInt32, false),
+    ]);
+
+    Ok(ArrowBatch {
+        schema,
+        chunk: Chunk::new(arrays),
+    })
 }

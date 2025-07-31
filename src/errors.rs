@@ -77,7 +77,4 @@ pub enum VcfParseError {
 
     #[error("RuntimeError: {message}")]
     RuntimeError { message: String },
-
-    #[error("Polars error: {message}")]
-    PolarsError { message: String },
 }
