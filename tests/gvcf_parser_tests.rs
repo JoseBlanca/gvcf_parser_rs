@@ -2,7 +2,6 @@ use gvcfparser::{
     errors::VcfParseError,
     gvcf_parser::{collect_variant_coords_in_df, GVcfRecord, GVcfRecordIterator},
 };
-use polars::prelude::*;
 use std::fs::File;
 use std::io::BufReader;
 
