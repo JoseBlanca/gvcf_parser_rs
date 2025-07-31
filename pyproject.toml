@@ -1,27 +1,17 @@
 [project]
-name = "vcf-parser-rs"
+name = "gvcf-parser-rs"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "genomicranges>=0.7.1",
-    "iranges>=0.5.2",
-    "maturin>=1.9.0",
-    "patchelf>=0.17.2.2",
+    "maturin>=1.9.2",
+    "patchelf>=0.17.2.4",
 ]
 
 [build-system]
-requires = ["maturin>=1.9,<2.0"]
+requires = ["maturin>=1.4,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
-
-[tool.uv]
-reinstall-package = ["vcfparser"]
-
-[dependency-groups]
-dev = [
-    "pytest>=8.4.1",
-]
+bindings = "pyo3"

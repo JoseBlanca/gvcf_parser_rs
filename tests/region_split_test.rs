@@ -1,9 +1,9 @@
-use std::fs::File;
-use std::io::BufReader;
-use vcfparser::{
+use gvcfparser::{
     errors::VcfParseError,
     region_splitter::{GVcfRecord, GVcfRecordIterator},
 };
+use std::fs::File;
+use std::io::BufReader;
 
 const SAMPLE_GVCF: &str = "##
 ##FORMAT=<ID=HQ,Number=2,Type=Integer,Description=\"Haplotype Quality\">
