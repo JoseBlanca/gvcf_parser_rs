@@ -1,4 +1,4 @@
-use crate::region_splitter::{GVcfRecord, GVcfRecordIterator};
+use crate::gvcf_parser::{GVcfRecord, GVcfRecordIterator};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use pyo3::types::PyType;

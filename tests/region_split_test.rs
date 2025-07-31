@@ -1,6 +1,6 @@
 use gvcfparser::{
     errors::VcfParseError,
-    region_splitter::{GVcfRecord, GVcfRecordIterator},
+    gvcf_parser::{GVcfRecord, GVcfRecordIterator},
 };
 use std::fs::File;
 use std::io::BufReader;

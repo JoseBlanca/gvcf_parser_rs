@@ -1,5 +1,5 @@
 use crate::errors::VcfParseError;
-use crate::utils_magic::{file_is_bgzipped, file_is_gzipped};
+use crate::utils_magic::file_is_gzipped;
 use flate2::read::MultiGzDecoder;
 use std::collections::VecDeque;
 use std::fs::File;
