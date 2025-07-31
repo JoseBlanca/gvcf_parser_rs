@@ -1,6 +1,7 @@
 use crate::errors::VcfParseError;
 use crate::utils_magic::file_is_gzipped;
 use flate2::read::MultiGzDecoder;
+use polars::prelude::*;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
@@ -203,4 +204,35 @@ impl<R: BufRead> Iterator for GVcfRecordIterator<R> {
     }
 }
 
-// fn get_span_covers_at_least(chrom, end) -> n_records, goes_beyond:bool, new_end
+pub fn collect_variant_coords_in_df<I>(iter: I) -> VcfResult<DataFrame>
+where
+    I: Iterator<Item = VcfResult<GVcfRecord>>,
+{
+    let mut chroms = Vec::new();
+    let mut positions = Vec::new();
+    let mut widths = Vec::new();
+
+    for result in iter {
+        match result {
+            Ok(rec) => {
+                let (start, end) = rec.get_span()?;
+                chroms.push(rec.chrom);
+                positions.push(start);
+                widths.push(end - start + 1);
+            }
+            Err(VcfParseError::InvariantgVCFLine) => continue,
+            Err(e) => return Err(e),
+        }
+    }
+
+    let df = df![
+        "chroms" => chroms,
+        "positions" => positions,
+        "var_widths" => widths,
+    ]
+    .map_err(|e| VcfParseError::PolarsError {
+        message: e.to_string(),
+    })?;
+
+    Ok(df)
+}

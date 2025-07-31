@@ -1,7 +1,8 @@
 use gvcfparser::{
     errors::VcfParseError,
-    gvcf_parser::{GVcfRecord, GVcfRecordIterator},
+    gvcf_parser::{collect_variant_coords_in_df, GVcfRecord, GVcfRecordIterator},
 };
+use polars::prelude::*;
 use std::fs::File;
 use std::io::BufReader;
 
@@ -171,4 +172,30 @@ fn test_g_vcf_record() {
         alleles: alleles,
     };
     assert!(matches!(snp.get_span(), Ok((10, 12))));
+}
+
+#[test]
+fn test_extract_coords_df() {
+    let records = vec![
+        Ok(GVcfRecord {
+            chrom: "chr1".to_string(),
+            pos: 100,
+            alleles: vec!["A".to_string(), "G".to_string()],
+        }),
+        Ok(GVcfRecord {
+            chrom: "chr2".to_string(),
+            pos: 200,
+            alleles: vec!["C".to_string(), "TAA".to_string()],
+        }),
+    ];
+
+    let df = collect_variant_coords_in_df(records.into_iter()).unwrap();
+    println!("{}", df);
+    assert_eq!(df.shape(), (2, 3));
+    let positions = df.column("positions").unwrap().u32().unwrap();
+    assert_eq!(positions.get(0), Some(100));
+    assert_eq!(positions.get(1), Some(200));
+    let var_widths = df.column("var_widths").unwrap().u32().unwrap();
+    assert_eq!(var_widths.get(0), Some(1));
+    assert_eq!(var_widths.get(1), Some(3));
 }
