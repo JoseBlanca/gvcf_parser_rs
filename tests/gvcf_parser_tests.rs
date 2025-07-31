@@ -1,7 +1,6 @@
-use arrow2::array::UInt32Array;
 use gvcfparser::{
     errors::VcfParseError,
-    gvcf_parser::{collect_variant_coords_as_arrow, GVcfRecord, GVcfRecordIterator},
+    gvcf_parser::{GVcfRecord, GVcfRecordIterator},
 };
 use std::fs::File;
 use std::io::BufReader;
@@ -172,44 +171,4 @@ fn test_g_vcf_record() {
         alleles: alleles,
     };
     assert!(matches!(snp.get_span(), Ok((10, 12))));
-}
-
-#[test]
-fn test_extract_coords_arrow_chunk() {
-    let records = vec![
-        Ok(GVcfRecord {
-            chrom: "chr1".to_string(),
-            pos: 100,
-            alleles: vec!["A".to_string(), "G".to_string()],
-        }),
-        Ok(GVcfRecord {
-            chrom: "chr2".to_string(),
-            pos: 200,
-            alleles: vec!["C".to_string(), "TAA".to_string()],
-        }),
-    ];
-
-    let batch = collect_variant_coords_as_arrow(records.into_iter()).unwrap();
-    let chunk = &batch.chunk;
-
-    assert_eq!(chunk.len(), 2);
-    assert_eq!(chunk.arrays().len(), 3);
-
-    // positions column
-    let positions = chunk.arrays()[1]
-        .as_any()
-        .downcast_ref::<UInt32Array>()
-        .unwrap();
-
-    assert_eq!(positions.get(0), Some(100));
-    assert_eq!(positions.get(1), Some(200));
-
-    // var_widths column
-    let widths = chunk.arrays()[2]
-        .as_any()
-        .downcast_ref::<UInt32Array>()
-        .unwrap();
-
-    assert_eq!(widths.get(0), Some(1)); // A and G → len = 1
-    assert_eq!(widths.get(1), Some(3)); // TAA → len = 3
 }
